@@ -1,7 +1,7 @@
--- ╔═══════════════════════════════════════════════════╗
--- ║   Hack Event  •  Meteor Client UI  •  v4          ║
--- ║   Combat: Aimbot  |  Visual: ESP                  ║
--- ╚═══════════════════════════════════════════════════╝
+-- ╔══════════════════════════════════════════════════════╗
+-- ║   Hack Event  •  Meteor UI  •  v5                   ║
+-- ║   3D box, centered tracer, fixed auto shoot         ║
+-- ╚══════════════════════════════════════════════════════╝
 
 local Players          = game:GetService("Players")
 local RunService       = game:GetService("RunService")
@@ -11,536 +11,591 @@ local TweenService     = game:GetService("TweenService")
 local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
 
--- ════════════════════════ CONSTANTS ════════════════════════
-local HOLD_TIME   = 0.35
-local SHOOT_DELAY = 0.12
-local MIN_R, MAX_R = 60, 360
+-- ══════════════════ CONFIG ══════════════════
+local HOLD_TIME   = 0.38
+local SHOOT_DELAY = 0.14
+local MIN_R, MAX_R = 60, 420
 
--- ════════════════════════ COLORS ════════════════════════
-local BG    = Color3.fromRGB(8,   8,  15)
-local BG2   = Color3.fromRGB(13,  13,  25)
-local HDR   = Color3.fromRGB(15,  17,  42)
-local ROW   = Color3.fromRGB(18,  18,  33)
-local BDR   = Color3.fromRGB(35,  58, 172)
-local BLUE  = Color3.fromRGB(55, 110, 255)
-local BLUE2 = Color3.fromRGB(28,  54, 158)
-local BLUE3 = Color3.fromRGB(45,  80, 200)
-local TEXT  = Color3.fromRGB(212, 217, 248)
-local DIM   = Color3.fromRGB(128, 133, 168)
-local RED   = Color3.fromRGB(255,  50,  50)
-local GREEN = Color3.fromRGB(50,  220, 100)
-local YLW   = Color3.fromRGB(255, 200,  40)
-local DARK  = Color3.fromRGB(40,  40,  65)
-local OFF   = Color3.fromRGB(48,  48,  75)
+-- ══════════════════ PALETTE ══════════════════
+local BG     = Color3.fromRGB( 10,  10,  18)
+local BG2    = Color3.fromRGB( 16,  14,  30)
+local HDR    = Color3.fromRGB( 22,  20,  50)
+local ROW    = Color3.fromRGB( 24,  22,  44)
+local ROW_ON = Color3.fromRGB( 18,  28,  80)
+local BDR    = Color3.fromRGB( 80,  60, 210)
+local BLUE   = Color3.fromRGB(100,  80, 255)
+local BLUE2  = Color3.fromRGB( 48,  36, 148)
+local TEXT   = Color3.fromRGB(222, 220, 252)
+local DIM    = Color3.fromRGB(145, 142, 178)
+local OFF    = Color3.fromRGB( 52,  50,  80)
+local RED    = Color3.fromRGB(255,  55,  55)
+local GREEN  = Color3.fromRGB( 55, 225, 100)
+local YLW    = Color3.fromRGB(255, 210,  50)
+local ESP_C  = Color3.fromRGB( 80, 130, 255)
 
--- ════════════════════════ STATE ════════════════════════
+-- ══════════════════ STATE ══════════════════
 local S = {
-    aimbot = { enabled=false, circleSize=180, throughWalls=true, autoShoot=false },
-    esp    = { enabled=false, box=true, tracer=true, health=true, showName=true, distance=true },
+    aimbot = { enabled=false, radius=180, throughWalls=true, autoShoot=false },
+    esp    = { enabled=false, box=true, tracer=true, health=true,
+               showName=true, distance=true },
 }
-local aimTarget  = nil
-local aimHL      = nil
-local lastShot   = 0
-local espObjects = {}   -- [userId] = { bT,bB,bL,bR, nameL, hpBg,hpFill, distL, tracer }
+local aimTarget, aimHL, lastShot = nil, nil, 0
+local espObjs = {}
 
--- ════════════════════════ SCREENGUI ════════════════════════
+-- ══════════════════ 3-D BOX DATA ══════════════════
+local HW, HD, YT, YB = 1.15, 0.55, 2.85, -2.85
+local CORNERS = {
+    Vector3.new(-HW, YB, -HD), Vector3.new( HW, YB, -HD),
+    Vector3.new( HW, YB,  HD), Vector3.new(-HW, YB,  HD),
+    Vector3.new(-HW, YT, -HD), Vector3.new( HW, YT, -HD),
+    Vector3.new( HW, YT,  HD), Vector3.new(-HW, YT,  HD),
+}
+local EDGES = {
+    {1,2},{2,3},{3,4},{4,1},   -- bottom
+    {5,6},{6,7},{7,8},{8,5},   -- top
+    {1,5},{2,6},{3,7},{4,8},   -- pillars
+}
+
+-- ══════════════════ SCREEN GUI ══════════════════
 local sg = Instance.new("ScreenGui")
-sg.Name="HackEvent"; sg.ResetOnSpawn=false
+sg.Name="HE"; sg.ResetOnSpawn=false
 sg.IgnoreGuiInset=true; sg.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
 sg.Parent = player.PlayerGui
 
--- ════════════════════════ CROSSHAIR ════════════════════════
-local cRing = Instance.new("Frame")
-cRing.BackgroundTransparency=1; cRing.BorderSizePixel=0
-cRing.ZIndex=4; cRing.Visible=false; cRing.Parent=sg
-Instance.new("UICorner",cRing).CornerRadius=UDim.new(1,0)
-local cStroke=Instance.new("UIStroke",cRing); cStroke.Thickness=2; cStroke.Color=BLUE
+-- ══════════════════ UTILITY ══════════════════
+local TI = TweenInfo.new(0.14, Enum.EasingStyle.Quad)
 
-local cDot=Instance.new("Frame"); cDot.Size=UDim2.new(0,6,0,6)
-cDot.BackgroundColor3=TEXT; cDot.BorderSizePixel=0; cDot.ZIndex=4; cDot.Visible=false; cDot.Parent=sg
-Instance.new("UICorner",cDot).CornerRadius=UDim.new(1,0)
+local function mk(cls, props, parent)
+    local i = Instance.new(cls)
+    for k,v in pairs(props) do i[k]=v end
+    if parent then i.Parent=parent end
+    return i
+end
 
-local cLH=Instance.new("Frame"); cLH.Size=UDim2.new(0,20,0,2)
-cLH.BackgroundColor3=TEXT; cLH.BorderSizePixel=0; cLH.ZIndex=4; cLH.Visible=false; cLH.Parent=sg
-local cLV=Instance.new("Frame"); cLV.Size=UDim2.new(0,2,0,20)
-cLV.BackgroundColor3=TEXT; cLV.BorderSizePixel=0; cLV.ZIndex=4; cLV.Visible=false; cLV.Parent=sg
+local function corner(p, r)
+    mk("UICorner",{CornerRadius=UDim.new(0,r or 6)},p); return p
+end
+
+local function stroke(p, col, th)
+    mk("UIStroke",{Color=col or BDR, Thickness=th or 0.8},p); return p
+end
+
+local function fixBot(p, h, col)     -- square off bottom corners of rounded header
+    mk("Frame",{Size=UDim2.new(1,0,0,h or 8),Position=UDim2.new(0,0,1,-(h or 8)),
+                BackgroundColor3=col or HDR,BorderSizePixel=0},p)
+end
+
+local function drawEdge(f, ax,ay,az, bx,by,bz)
+    if az<=0 or bz<=0 then f.Visible=false; return end
+    local dx,dy = bx-ax, by-ay
+    local ln = math.sqrt(dx*dx+dy*dy)
+    if ln<0.5 then f.Visible=false; return end
+    f.AnchorPoint = Vector2.new(0,0.5)
+    f.Position    = UDim2.new(0,ax,0,ay)
+    f.Size        = UDim2.new(0,ln,0,1.5)
+    f.Rotation    = math.deg(math.atan2(dy,dx))
+    f.Visible     = true
+end
+
+local function mkLine(zi, col)
+    return mk("Frame",{BackgroundColor3=col or ESP_C,BorderSizePixel=0,
+                       AnchorPoint=Vector2.new(0,0.5),ZIndex=zi or 2,Visible=false},sg)
+end
+
+-- ══════════════════ CROSSHAIR ══════════════════
+local cRing = corner(mk("Frame",{
+    BackgroundTransparency=1,BorderSizePixel=0,ZIndex=4,Visible=false},sg),500)
+local cRS = mk("UIStroke",{Color=BLUE,Thickness=2},cRing)
+
+local cDot = corner(mk("Frame",{
+    Size=UDim2.new(0,7,0,7),BackgroundColor3=TEXT,
+    BorderSizePixel=0,ZIndex=5,Visible=false},sg),500)
+
+local cLH = mk("Frame",{Size=UDim2.new(0,20,0,2),BackgroundColor3=TEXT,
+    BorderSizePixel=0,ZIndex=5,Visible=false},sg)
+local cLV = mk("Frame",{Size=UDim2.new(0,2,0,20),BackgroundColor3=TEXT,
+    BorderSizePixel=0,ZIndex=5,Visible=false},sg)
 
 local function updCross()
-    local r=S.aimbot.circleSize
-    cRing.Size=UDim2.new(0,r*2,0,r*2); cRing.Position=UDim2.new(0.5,-r,0.5,-r)
-    cDot.Position=UDim2.new(0.5,-3,0.5,-3)
-    cLH.Position=UDim2.new(0.5,-10,0.5,-1); cLV.Position=UDim2.new(0.5,-1,0.5,-10)
+    local r = S.aimbot.radius
+    cRing.Size     = UDim2.new(0,r*2,0,r*2)
+    cRing.Position = UDim2.new(0.5,-r,0.5,-r)
+    cDot.Position  = UDim2.new(0.5,-3,0.5,-3)
+    cLH.Position   = UDim2.new(0.5,-10,0.5,-1)
+    cLV.Position   = UDim2.new(0.5,-1,0.5,-10)
 end
+
 local function crossCol(t)
-    local c=t and RED or BLUE
-    cStroke.Color=c; cDot.BackgroundColor3=c; cLH.BackgroundColor3=c; cLV.BackgroundColor3=c
+    local c = t and RED or BLUE
+    cRS.Color=c; cDot.BackgroundColor3=c; cLH.BackgroundColor3=c; cLV.BackgroundColor3=c
 end
+
 local function crossVis(v)
     cRing.Visible=v; cDot.Visible=v; cLH.Visible=v; cLV.Visible=v
 end
+
 updCross()
 
--- ════════════════════════ SETTINGS OVERLAY ════════════════════════
-local openSettings  -- forward declare
+-- ══════════════════ SETTINGS OVERLAY ══════════════════
+local ov = mk("Frame",{Size=UDim2.new(1,0,1,0),BackgroundColor3=Color3.new(0,0,0),
+    BackgroundTransparency=0.48,BorderSizePixel=0,ZIndex=30,Visible=false},sg)
 
-local overlay=Instance.new("Frame")
-overlay.Size=UDim2.new(1,0,1,0); overlay.BackgroundColor3=Color3.fromRGB(0,0,0)
-overlay.BackgroundTransparency=0.45; overlay.BorderSizePixel=0
-overlay.ZIndex=20; overlay.Visible=false; overlay.Parent=sg
+local sBox = corner(mk("Frame",{
+    AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.new(0.5,0,0.5,0),
+    Size=UDim2.new(0,310,0,80),BackgroundColor3=BG2,
+    BorderSizePixel=0,ZIndex=31},ov),8)
+stroke(sBox,BLUE,1)
 
-local sBox=Instance.new("Frame")
-sBox.AnchorPoint=Vector2.new(0.5,0.5); sBox.Position=UDim2.new(0.5,0,0.5,0)
-sBox.Size=UDim2.new(0,295,0,60)   -- height set when opened
-sBox.BackgroundColor3=BG2; sBox.BorderSizePixel=0; sBox.ZIndex=21; sBox.Parent=overlay
-Instance.new("UICorner",sBox).CornerRadius=UDim.new(0,8)
-local sbS=Instance.new("UIStroke",sBox); sbS.Color=BLUE3; sbS.Thickness=1
+local sHdr = mk("Frame",{Size=UDim2.new(1,0,0,48),BackgroundColor3=HDR,
+    BorderSizePixel=0,ZIndex=32},sBox)
+corner(sHdr,8); fixBot(sHdr,8,HDR)
 
-local sHdr=Instance.new("Frame")
-sHdr.Size=UDim2.new(1,0,0,46); sHdr.BackgroundColor3=HDR; sHdr.BorderSizePixel=0
-sHdr.ZIndex=22; sHdr.Parent=sBox
-Instance.new("UICorner",sHdr).CornerRadius=UDim.new(0,8)
-local shFix=Instance.new("Frame"); shFix.Size=UDim2.new(1,0,0,8); shFix.Position=UDim2.new(0,0,1,-8)
-shFix.BackgroundColor3=HDR; shFix.BorderSizePixel=0; shFix.ZIndex=22; shFix.Parent=sHdr
+local backBtn = corner(mk("TextButton",{
+    Text="←",Size=UDim2.new(0,38,0,30),Position=UDim2.new(0,8,0.5,-15),
+    BackgroundColor3=BLUE2,TextColor3=TEXT,TextSize=18,
+    Font=Enum.Font.GothamBold,BorderSizePixel=0,ZIndex=33},sHdr),5)
 
-local backBtn=Instance.new("TextButton"); backBtn.Text="←"
-backBtn.Size=UDim2.new(0,36,0,30); backBtn.Position=UDim2.new(0,8,0.5,-15)
-backBtn.BackgroundColor3=BLUE2; backBtn.TextColor3=TEXT; backBtn.TextSize=18
-backBtn.Font=Enum.Font.GothamBold; backBtn.BorderSizePixel=0; backBtn.ZIndex=23; backBtn.Parent=sHdr
-Instance.new("UICorner",backBtn).CornerRadius=UDim.new(0,5)
+local sTitleL = mk("TextLabel",{
+    Size=UDim2.new(1,-58,1,0),Position=UDim2.new(0,54,0,0),
+    BackgroundTransparency=1,TextColor3=TEXT,TextSize=16,
+    Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=33},sHdr)
 
-local sTitleL=Instance.new("TextLabel"); sTitleL.Size=UDim2.new(1,-55,1,0)
-sTitleL.Position=UDim2.new(0,52,0,0); sTitleL.BackgroundTransparency=1
-sTitleL.TextColor3=TEXT; sTitleL.TextSize=15; sTitleL.Font=Enum.Font.GothamBold
-sTitleL.TextXAlignment=Enum.TextXAlignment.Left; sTitleL.ZIndex=23; sTitleL.Parent=sHdr
+local sCont = mk("Frame",{
+    Position=UDim2.new(0,10,0,54),Size=UDim2.new(1,-20,1,-62),
+    BackgroundTransparency=1,ZIndex=32},sBox)
+local sLL = mk("UIListLayout",{Padding=UDim.new(0,5),SortOrder=Enum.SortOrder.LayoutOrder},sCont)
 
-local sCont=Instance.new("Frame")
-sCont.Position=UDim2.new(0,10,0,52); sCont.Size=UDim2.new(1,-20,1,-60)
-sCont.BackgroundTransparency=1; sCont.ZIndex=22; sCont.Parent=sBox
-local sLL=Instance.new("UIListLayout",sCont); sLL.Padding=UDim.new(0,5); sLL.SortOrder=Enum.SortOrder.LayoutOrder
+local slConns = {}
+
+local function clearSettings()
+    for _,c in ipairs(slConns) do c:Disconnect() end
+    table.clear(slConns)
+    for _,c in ipairs(sCont:GetChildren()) do
+        if not c:IsA("UIListLayout") then c:Destroy() end
+    end
+end
 
 backBtn.MouseButton1Click:Connect(function()
-    overlay.Visible=false
-    for _,c in ipairs(sCont:GetChildren()) do if not c:IsA("UIListLayout") then c:Destroy() end end
+    ov.Visible=false; clearSettings()
 end)
 
--- Helper: toggle row inside settings
-local function mkSToggle(label, initVal, onChange)
-    local row=Instance.new("Frame"); row.Size=UDim2.new(1,0,0,42)
-    row.BackgroundColor3=ROW; row.BorderSizePixel=0; row.ZIndex=23; row.Parent=sCont
-    Instance.new("UICorner",row).CornerRadius=UDim.new(0,6)
-
-    local l=Instance.new("TextLabel"); l.Text=label
-    l.Size=UDim2.new(1,-62,1,0); l.Position=UDim2.new(0,12,0,0)
-    l.BackgroundTransparency=1; l.TextColor3=TEXT; l.TextSize=13
-    l.Font=Enum.Font.Gotham; l.TextXAlignment=Enum.TextXAlignment.Left; l.ZIndex=24; l.Parent=row
-
-    local bg=Instance.new("Frame"); bg.Size=UDim2.new(0,44,0,24); bg.Position=UDim2.new(1,-52,0.5,-12)
-    bg.BackgroundColor3=initVal and BLUE or OFF; bg.BorderSizePixel=0; bg.ZIndex=24; bg.Parent=row
-    Instance.new("UICorner",bg).CornerRadius=UDim.new(1,0)
-
-    local kn=Instance.new("Frame"); kn.Size=UDim2.new(0,18,0,18)
-    kn.Position=initVal and UDim2.new(1,-21,0.5,-9) or UDim2.new(0,3,0.5,-9)
-    kn.BackgroundColor3=Color3.fromRGB(255,255,255); kn.BorderSizePixel=0; kn.ZIndex=25; kn.Parent=bg
-    Instance.new("UICorner",kn).CornerRadius=UDim.new(1,0)
-
-    local st={v=initVal}
-    local hit=Instance.new("TextButton"); hit.Size=UDim2.new(1,0,1,0)
-    hit.BackgroundTransparency=1; hit.Text=""; hit.ZIndex=25; hit.Parent=row
-    local ti=TweenInfo.new(0.12,Enum.EasingStyle.Quad)
+-- Settings row builders
+local function mkSTog(lbl,init,cb,order)
+    local row = corner(mk("Frame",{Size=UDim2.new(1,0,0,44),BackgroundColor3=ROW,
+        BorderSizePixel=0,ZIndex=33,LayoutOrder=order or 1},sCont),7)
+    mk("TextLabel",{Text=lbl,Size=UDim2.new(1,-62,1,0),Position=UDim2.new(0,13,0,0),
+        BackgroundTransparency=1,TextColor3=TEXT,TextSize=14,
+        Font=Enum.Font.Gotham,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=34},row)
+    local bg = corner(mk("Frame",{Size=UDim2.new(0,46,0,26),Position=UDim2.new(1,-54,0.5,-13),
+        BackgroundColor3=init and BLUE or OFF,BorderSizePixel=0,ZIndex=34},row),500)
+    local kn = corner(mk("Frame",{Size=UDim2.new(0,20,0,20),
+        Position=init and UDim2.new(1,-23,0.5,-10) or UDim2.new(0,3,0.5,-10),
+        BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0,ZIndex=35},bg),500)
+    local st={v=init}
+    local hit=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,
+        Text="",ZIndex=35},row)
     hit.MouseButton1Click:Connect(function()
         st.v=not st.v
-        TweenService:Create(bg,ti,{BackgroundColor3=st.v and BLUE or OFF}):Play()
-        TweenService:Create(kn,ti,{Position=st.v and UDim2.new(1,-21,0.5,-9) or UDim2.new(0,3,0.5,-9)}):Play()
-        onChange(st.v)
+        TweenService:Create(bg,TI,{BackgroundColor3=st.v and BLUE or OFF}):Play()
+        TweenService:Create(kn,TI,{Position=st.v and UDim2.new(1,-23,0.5,-10)
+            or UDim2.new(0,3,0.5,-10)}):Play()
+        cb(st.v)
     end)
 end
 
--- Helper: slider row inside settings
-local sliderConns={}
-
-local function mkSSlider(label, mn, mx, initVal, onChange)
-    local row=Instance.new("Frame"); row.Size=UDim2.new(1,0,0,58)
-    row.BackgroundColor3=ROW; row.BorderSizePixel=0; row.ZIndex=23; row.Parent=sCont
-    Instance.new("UICorner",row).CornerRadius=UDim.new(0,6)
-
-    local lbl=Instance.new("TextLabel"); lbl.Text=label.."  "..tostring(initVal)
-    lbl.Size=UDim2.new(1,-12,0,26); lbl.Position=UDim2.new(0,12,0,4)
-    lbl.BackgroundTransparency=1; lbl.TextColor3=TEXT; lbl.TextSize=13
-    lbl.Font=Enum.Font.Gotham; lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.ZIndex=24; lbl.Parent=row
-
-    local trk=Instance.new("Frame"); trk.Size=UDim2.new(1,-24,0,7); trk.Position=UDim2.new(0,12,0,36)
-    trk.BackgroundColor3=DARK; trk.BorderSizePixel=0; trk.ZIndex=24; trk.Parent=row
-    Instance.new("UICorner",trk).CornerRadius=UDim.new(1,0)
-
-    local p0=(initVal-mn)/(mx-mn)
-    local fill=Instance.new("Frame"); fill.Size=UDim2.new(p0,0,1,0)
-    fill.BackgroundColor3=BLUE; fill.BorderSizePixel=0; fill.ZIndex=25; fill.Parent=trk
-    Instance.new("UICorner",fill).CornerRadius=UDim.new(1,0)
-
-    local kn=Instance.new("Frame"); kn.Size=UDim2.new(0,20,0,20)
-    kn.Position=UDim2.new(p0,-10,0.5,-10); kn.BackgroundColor3=Color3.fromRGB(255,255,255)
-    kn.BorderSizePixel=0; kn.ZIndex=26; kn.Parent=trk
-    Instance.new("UICorner",kn).CornerRadius=UDim.new(1,0)
-
-    local dragging=false
+local function mkSSl(lbl,mn,mx,init,cb,order)
+    local row = corner(mk("Frame",{Size=UDim2.new(1,0,0,60),BackgroundColor3=ROW,
+        BorderSizePixel=0,ZIndex=33,LayoutOrder=order or 1},sCont),7)
+    local valLbl=mk("TextLabel",{Text=lbl.."   "..init,Size=UDim2.new(1,-12,0,24),
+        Position=UDim2.new(0,13,0,4),BackgroundTransparency=1,TextColor3=TEXT,TextSize=13,
+        Font=Enum.Font.Gotham,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=34},row)
+    local trk=corner(mk("Frame",{Size=UDim2.new(1,-26,0,7),Position=UDim2.new(0,13,0,38),
+        BackgroundColor3=Color3.fromRGB(38,36,70),BorderSizePixel=0,ZIndex=34},row),500)
+    local p0=(init-mn)/(mx-mn)
+    local fill=corner(mk("Frame",{Size=UDim2.new(p0,0,1,0),BackgroundColor3=BLUE,
+        BorderSizePixel=0,ZIndex=35},trk),500)
+    local kn=corner(mk("Frame",{Size=UDim2.new(0,20,0,20),
+        Position=UDim2.new(p0,-10,0.5,-10),BackgroundColor3=Color3.new(1,1,1),
+        BorderSizePixel=0,ZIndex=36},trk),500)
+    local drag=false
     trk.InputBegan:Connect(function(i)
-        if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
-            dragging=true
-        end
+        if i.UserInputType==Enum.UserInputType.MouseButton1
+            or i.UserInputType==Enum.UserInputType.Touch then drag=true end
     end)
     trk.InputEnded:Connect(function(i)
-        if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
-            dragging=false
-        end
+        if i.UserInputType==Enum.UserInputType.MouseButton1
+            or i.UserInputType==Enum.UserInputType.Touch then drag=false end
     end)
-    table.insert(sliderConns, UserInputService.InputChanged:Connect(function(i)
-        if not dragging then return end
-        if i.UserInputType~=Enum.UserInputType.MouseMovement and i.UserInputType~=Enum.UserInputType.Touch then return end
+    table.insert(slConns, UserInputService.InputChanged:Connect(function(i)
+        if not drag then return end
+        if i.UserInputType~=Enum.UserInputType.MouseMovement
+            and i.UserInputType~=Enum.UserInputType.Touch then return end
         local ap=trk.AbsolutePosition; local as=trk.AbsoluteSize
-        local p=math.clamp((i.Position.X-ap.X)/as.X, 0, 1)
-        local val=math.floor(mn+p*(mx-mn))
+        local p=math.clamp((i.Position.X-ap.X)/as.X,0,1)
+        local v=math.floor(mn+p*(mx-mn))
         fill.Size=UDim2.new(p,0,1,0); kn.Position=UDim2.new(p,-10,0.5,-10)
-        lbl.Text=label.."  "..tostring(val); onChange(val)
+        valLbl.Text=lbl.."   "..v; cb(v)
     end))
 end
 
--- openSettings definition
-openSettings = function(key)
-    for _,c in ipairs(sliderConns) do c:Disconnect() end
-    table.clear(sliderConns)
-    for _,c in ipairs(sCont:GetChildren()) do if not c:IsA("UIListLayout") then c:Destroy() end end
-
-    sTitleL.Text = key:sub(1,1):upper()..key:sub(2)
-    overlay.Visible = true
-
+-- open settings for a key
+local function openSettings(key)
+    clearSettings()
+    sTitleL.Text = key:sub(1,1):upper()..key:sub(2).." Settings"
+    ov.Visible = true
     if key=="aimbot" then
-        mkSSlider("Circle size", MIN_R, MAX_R, S.aimbot.circleSize, function(v)
-            S.aimbot.circleSize=v; updCross()
-        end)
-        mkSToggle("Through walls", S.aimbot.throughWalls, function(v) S.aimbot.throughWalls=v end)
-        mkSToggle("Auto shoot",    S.aimbot.autoShoot,    function(v) S.aimbot.autoShoot=v   end)
-        sBox.Size=UDim2.new(0,295,0, 46+10+58+42+42+14)
-
+        mkSSl("Circle radius",MIN_R,MAX_R,S.aimbot.radius,function(v)
+            S.aimbot.radius=v; updCross()
+        end,1)
+        mkSTog("Through walls",S.aimbot.throughWalls,function(v)S.aimbot.throughWalls=v end,2)
+        mkSTog("Auto shoot",S.aimbot.autoShoot,function(v)S.aimbot.autoShoot=v end,3)
+        sBox.Size=UDim2.new(0,310,0, 48+10+60+44+44+18)
     elseif key=="esp" then
-        mkSToggle("Box",      S.esp.box,      function(v) S.esp.box=v      end)
-        mkSToggle("Tracer",   S.esp.tracer,   function(v) S.esp.tracer=v   end)
-        mkSToggle("Health",   S.esp.health,   function(v) S.esp.health=v   end)
-        mkSToggle("Name",     S.esp.showName, function(v) S.esp.showName=v end)
-        mkSToggle("Distance", S.esp.distance, function(v) S.esp.distance=v end)
-        sBox.Size=UDim2.new(0,295,0, 46+10+42*5+5*5+10)
+        mkSTog("Box",        S.esp.box,      function(v)S.esp.box=v      end,1)
+        mkSTog("Tracer",     S.esp.tracer,   function(v)S.esp.tracer=v   end,2)
+        mkSTog("Health bar", S.esp.health,   function(v)S.esp.health=v   end,3)
+        mkSTog("Name",       S.esp.showName, function(v)S.esp.showName=v end,4)
+        mkSTog("Distance",   S.esp.distance, function(v)S.esp.distance=v end,5)
+        sBox.Size=UDim2.new(0,310,0, 48+10+44*5+5*4+18)
     end
 end
 
--- ════════════════════════ PANEL ════════════════════════
-local PW,TH,HH,MH = 434, 44, 42, 40
-local CW,CG,PAD   = 202, 10, 10
+-- ══════════════════ METEOR PANEL ══════════════════
+-- Toggle cube (bottom-right like Meteor logo)
+local cube = corner(mk("Frame",{
+    Size=UDim2.new(0,50,0,50),AnchorPoint=Vector2.new(1,1),
+    Position=UDim2.new(1,-16,1,-80),BackgroundColor3=BLUE2,
+    BorderSizePixel=0,ZIndex=10},sg),10)
+stroke(cube,BLUE,1)
 
-local combatList={"Aimbot"}
-local visualList={"ESP"}
-local cExp,vExp=false,false
+-- Inner cube decoration
+corner(mk("Frame",{Size=UDim2.new(0,28,0,28),AnchorPoint=Vector2.new(0.5,0.5),
+    Position=UDim2.new(0.5,0,0.5,0),BackgroundColor3=BLUE,
+    BorderSizePixel=0,ZIndex=11},cube),6)
+mk("TextLabel",{Text="HE",Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,
+    TextColor3=TEXT,TextSize=14,Font=Enum.Font.GothamBold,ZIndex=12},cube)
 
-local function calcPH()
-    local a=HH+(cExp and #combatList*MH or 0)
-    local b=HH+(vExp and #visualList*MH or 0)
-    return TH+math.max(a,b)+PAD*2
-end
+local cubeBtn = mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,
+    Text="",ZIndex=13},cube)
 
-local panel=Instance.new("Frame")
-panel.Size=UDim2.new(0,PW,0,calcPH()); panel.Position=UDim2.new(0.5,-PW/2,0,72)
-panel.BackgroundColor3=BG; panel.BorderSizePixel=0
-panel.Active=true; panel.ClipsDescendants=true; panel.Parent=sg
-Instance.new("UICorner",panel).CornerRadius=UDim.new(0,6)
-local pS=Instance.new("UIStroke",panel); pS.Color=BDR; pS.Thickness=0.8
+-- Main panel (two columns)
+local COL_W = 160
+local COL_GAP = 8
+local PAD = 8
+local PANEL_W = PAD + COL_W + COL_GAP + COL_W + PAD  -- 356
+local MOD_H = 38
+local HDR_H = 40
 
--- Title bar
-local tb=Instance.new("Frame"); tb.Size=UDim2.new(1,0,0,TH)
-tb.BackgroundColor3=HDR; tb.BorderSizePixel=0; tb.Active=true; tb.Parent=panel
-Instance.new("UICorner",tb).CornerRadius=UDim.new(0,6)
-local tbF=Instance.new("Frame"); tbF.Size=UDim2.new(1,0,0,6); tbF.Position=UDim2.new(0,0,1,-6)
-tbF.BackgroundColor3=HDR; tbF.BorderSizePixel=0; tbF.Parent=tb
-
-local tDot=Instance.new("Frame"); tDot.Size=UDim2.new(0,8,0,8); tDot.Position=UDim2.new(0,13,0.5,-4)
-tDot.BackgroundColor3=BLUE; tDot.BorderSizePixel=0; tDot.Parent=tb
-Instance.new("UICorner",tDot).CornerRadius=UDim.new(1,0)
-
-local tLbl=Instance.new("TextLabel"); tLbl.Text="Hack Event"
-tLbl.Size=UDim2.new(1,-30,1,0); tLbl.Position=UDim2.new(0,28,0,0)
-tLbl.BackgroundTransparency=1; tLbl.TextColor3=TEXT; tLbl.TextSize=17
-tLbl.Font=Enum.Font.GothamBold; tLbl.TextXAlignment=Enum.TextXAlignment.Left; tLbl.Parent=tb
+local panel = corner(mk("Frame",{
+    Size=UDim2.new(0,PANEL_W,0,HDR_H + MOD_H + PAD*2),
+    Position=UDim2.new(0.5,-PANEL_W/2,0,60),
+    BackgroundColor3=BG,BorderSizePixel=0,
+    ClipsDescendants=true,Parent=sg,ZIndex=5}),8)
+stroke(panel,BDR,0.8)
 
 -- Drag
-local dr=false; local drS,drP
-tb.InputBegan:Connect(function(i)
-    if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
-        dr=true; drS=i.Position; drP=panel.Position
+local dragging,dragStart,dragOrigin=false
+local dTb=mk("Frame",{Size=UDim2.new(1,0,0,40),BackgroundColor3=HDR,
+    BorderSizePixel=0,ZIndex=6},panel)
+corner(dTb,8); fixBot(dTb,8,HDR)
+
+mk("Frame",{Size=UDim2.new(0,9,0,9),Position=UDim2.new(0,12,0.5,-4),
+    BackgroundColor3=BLUE,BorderSizePixel=0,ZIndex=7},dTb)
+    :FindFirstChildOfClass("UICorner") -- no-op, just chained. We add it below:
+local tdot=dTb:FindFirstChildOfClass("Frame")
+if tdot then corner(tdot,500) end
+
+mk("TextLabel",{Text="Hack Event",Size=UDim2.new(1,-30,1,0),Position=UDim2.new(0,28,0,0),
+    BackgroundTransparency=1,TextColor3=TEXT,TextSize=17,Font=Enum.Font.GothamBold,
+    TextXAlignment=Enum.TextXAlignment.Left,ZIndex=7},dTb)
+
+dTb.InputBegan:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseButton1
+        or i.UserInputType==Enum.UserInputType.Touch then
+        dragging=true; dragStart=i.Position; dragOrigin=panel.Position
     end
 end)
 UserInputService.InputChanged:Connect(function(i)
-    if dr and (i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch) then
-        local d=i.Position-drS
-        panel.Position=UDim2.new(drP.X.Scale,drP.X.Offset+d.X,drP.Y.Scale,drP.Y.Offset+d.Y)
+    if dragging and (i.UserInputType==Enum.UserInputType.MouseMovement
+        or i.UserInputType==Enum.UserInputType.Touch) then
+        local d=i.Position-dragStart
+        panel.Position=UDim2.new(dragOrigin.X.Scale,dragOrigin.X.Offset+d.X,
+                                  dragOrigin.Y.Scale,dragOrigin.Y.Offset+d.Y)
     end
 end)
 UserInputService.InputEnded:Connect(function(i)
-    if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dr=false end
+    if i.UserInputType==Enum.UserInputType.MouseButton1
+        or i.UserInputType==Enum.UserInputType.Touch then dragging=false end
 end)
 
--- Columns
-local cols=Instance.new("Frame")
-cols.Size=UDim2.new(1,-PAD*2,0,calcPH()-TH-PAD)
-cols.Position=UDim2.new(0,PAD,0,TH+PAD/2)
-cols.BackgroundTransparency=1; cols.ClipsDescendants=false; cols.Parent=panel
+-- Panel visibility
+local panelVisible = true
+cubeBtn.MouseButton1Click:Connect(function()
+    panelVisible=not panelVisible
+    panel.Visible=panelVisible
+end)
 
-local cCol=Instance.new("Frame"); cCol.BackgroundTransparency=1; cCol.ClipsDescendants=true; cCol.Parent=cols
-cCol.Size=UDim2.new(0,CW,1,0); cCol.Position=UDim2.new(0,0,0,0)
-local vCol=Instance.new("Frame"); vCol.BackgroundTransparency=1; vCol.ClipsDescendants=true; vCol.Parent=cols
-vCol.Size=UDim2.new(0,CW,1,0); vCol.Position=UDim2.new(0,CW+CG,0,0)
+-- Columns container
+local colsFrame = mk("Frame",{
+    Size=UDim2.new(1,-PAD*2,1,-HDR_H-PAD),
+    Position=UDim2.new(0,PAD,0,HDR_H+PAD/2),
+    BackgroundTransparency=1,ClipsDescendants=false,ZIndex=6},panel)
 
-local function reflow()
-    local a=HH+(cExp and #combatList*MH or 0)
-    local b=HH+(vExp and #visualList*MH or 0)
-    local mx=math.max(a,b); local ph=TH+mx+PAD*2
-    local tw=TweenInfo.new(0.18,Enum.EasingStyle.Quad)
-    TweenService:Create(panel,tw,{Size=UDim2.new(0,PW,0,ph)}):Play()
-    TweenService:Create(cols,tw,{Size=UDim2.new(1,-PAD*2,0,mx)}):Play()
-    TweenService:Create(cCol,tw,{Size=UDim2.new(0,CW,0,mx)}):Play()
-    TweenService:Create(vCol,tw,{Size=UDim2.new(0,CW,0,mx)}):Play()
-end
+local modInfo = {}
 
--- Module info for dot/row coloring
-local modInfo={}   -- [key] = {dot, row}
+local function mkCol(parent, xOff, title, key, mods)
+    local col = mk("Frame",{
+        Size=UDim2.new(0,COL_W,1,0),Position=UDim2.new(0,xOff,0,0),
+        BackgroundTransparency=1,ClipsDescendants=false,ZIndex=6},parent)
 
-local function refreshMod(key)
-    local m=modInfo[key]; if not m then return end
-    local on=S[key] and S[key].enabled
-    TweenService:Create(m.dot,TweenInfo.new(0.1),{BackgroundColor3=on and BLUE or DIM}):Play()
-    TweenService:Create(m.row,TweenInfo.new(0.1),{BackgroundColor3=on and Color3.fromRGB(14,26,65) or ROW}):Play()
-end
+    -- Column header
+    local hdr = corner(mk("Frame",{Size=UDim2.new(1,0,0,HDR_H),
+        BackgroundColor3=HDR,BorderSizePixel=0,ZIndex=7},col),6)
+    stroke(hdr,BDR,0.7)
 
--- ════════════════════════ COLUMN BUILDER ════════════════════════
-local function buildCol(parent, title, mods, catKey)
-    -- header
-    local hdr=Instance.new("Frame"); hdr.Size=UDim2.new(1,0,0,HH)
-    hdr.BackgroundColor3=HDR; hdr.BorderSizePixel=0; hdr.Parent=parent
-    Instance.new("UICorner",hdr).CornerRadius=UDim.new(0,5)
-    local hs=Instance.new("UIStroke",hdr); hs.Color=BDR; hs.Thickness=0.7
+    local dot = corner(mk("Frame",{Size=UDim2.new(0,7,0,7),
+        Position=UDim2.new(0,10,0.5,-3),BackgroundColor3=DIM,
+        BorderSizePixel=0,ZIndex=8},hdr),500)
 
-    local hL=Instance.new("TextLabel"); hL.Text=title
-    hL.Size=UDim2.new(1,-46,1,0); hL.Position=UDim2.new(0,11,0,0)
-    hL.BackgroundTransparency=1; hL.TextColor3=TEXT; hL.TextSize=15
-    hL.Font=Enum.Font.GothamBold; hL.TextXAlignment=Enum.TextXAlignment.Left; hL.Parent=hdr
+    mk("TextLabel",{Text=title,Size=UDim2.new(1,-28,1,0),Position=UDim2.new(0,24,0,0),
+        BackgroundTransparency=1,TextColor3=TEXT,TextSize=14,
+        Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=8},hdr)
 
-    local arw=Instance.new("TextButton"); arw.Text=">"
-    arw.Size=UDim2.new(0,32,0,28); arw.Position=UDim2.new(1,-36,0.5,-14)
-    arw.BackgroundColor3=BLUE2; arw.TextColor3=TEXT; arw.TextSize=14
-    arw.Font=Enum.Font.GothamBold; arw.BorderSizePixel=0; arw.Parent=hdr
-    Instance.new("UICorner",arw).CornerRadius=UDim.new(0,5)
+    -- Module rows
+    local mFrame=mk("Frame",{Position=UDim2.new(0,0,0,HDR_H+4),
+        Size=UDim2.new(1,0,0,#mods*MOD_H),BackgroundTransparency=1,ZIndex=7},col)
+    mk("UIListLayout",{Padding=UDim.new(0,3),SortOrder=Enum.SortOrder.LayoutOrder},mFrame)
 
-    -- module list
-    local mFrame=Instance.new("Frame"); mFrame.Position=UDim2.new(0,0,0,HH+4)
-    mFrame.Size=UDim2.new(1,0,0,#mods*MH+4); mFrame.BackgroundTransparency=1
-    mFrame.Visible=false; mFrame.Parent=parent
-    local ll=Instance.new("UIListLayout",mFrame); ll.Padding=UDim.new(0,4); ll.SortOrder=Enum.SortOrder.LayoutOrder
+    local function reflow()
+        local es = S[key] and S[key].enabled
+        TweenService:Create(dot,TI,{BackgroundColor3=es and BLUE or DIM}):Play()
+    end
 
     for idx,modName in ipairs(mods) do
-        local key=modName:lower()
-        local row=Instance.new("Frame"); row.Size=UDim2.new(1,0,0,MH-4)
-        row.BackgroundColor3=ROW; row.BorderSizePixel=0; row.LayoutOrder=idx; row.Parent=mFrame
-        Instance.new("UICorner",row).CornerRadius=UDim.new(0,5)
-        local rs=Instance.new("UIStroke",row); rs.Color=BDR; rs.Thickness=0.6
+        local mkey = modName:lower()
+        local row = corner(mk("Frame",{Size=UDim2.new(1,0,0,MOD_H-3),
+            BackgroundColor3=ROW,BorderSizePixel=0,ZIndex=8,LayoutOrder=idx},mFrame),6)
+        stroke(row,BDR,0.5)
 
-        local dot=Instance.new("Frame"); dot.Size=UDim2.new(0,7,0,7)
-        dot.Position=UDim2.new(0,11,0.5,-3); dot.BackgroundColor3=DIM; dot.BorderSizePixel=0; dot.Parent=row
-        Instance.new("UICorner",dot).CornerRadius=UDim.new(1,0)
+        local mdot = corner(mk("Frame",{Size=UDim2.new(0,7,0,7),
+            Position=UDim2.new(0,10,0.5,-3),BackgroundColor3=DIM,
+            BorderSizePixel=0,ZIndex=9},row),500)
 
-        local rl=Instance.new("TextLabel"); rl.Text=modName
-        rl.Size=UDim2.new(1,-26,1,0); rl.Position=UDim2.new(0,24,0,0)
-        rl.BackgroundTransparency=1; rl.TextColor3=TEXT; rl.TextSize=14
-        rl.Font=Enum.Font.Gotham; rl.TextXAlignment=Enum.TextXAlignment.Left; rl.Parent=row
+        mk("TextLabel",{Text=modName,Size=UDim2.new(1,-24,1,0),
+            Position=UDim2.new(0,23,0,0),BackgroundTransparency=1,
+            TextColor3=TEXT,TextSize=13,Font=Enum.Font.Gotham,
+            TextXAlignment=Enum.TextXAlignment.Left,ZIndex=9},row)
 
-        local hit=Instance.new("TextButton"); hit.Size=UDim2.new(1,0,1,0)
-        hit.BackgroundTransparency=1; hit.Text=""; hit.Parent=row
+        local hit=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,
+            Text="",ZIndex=10},row)
 
-        modInfo[key]={dot=dot, row=row}
+        modInfo[mkey]={dot=mdot, row=row}
 
-        -- hold vs tap
+        -- Tap vs Hold
         local hConn=nil
         hit.InputBegan:Connect(function(i)
-            if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
-                hConn=task.delay(HOLD_TIME, function()
-                    hConn=nil
-                    openSettings(key)
+            if i.UserInputType==Enum.UserInputType.MouseButton1
+                or i.UserInputType==Enum.UserInputType.Touch then
+                hConn=task.delay(HOLD_TIME,function()
+                    hConn=nil; openSettings(mkey)
                 end)
             end
         end)
         hit.InputEnded:Connect(function(i)
-            if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+            if i.UserInputType==Enum.UserInputType.MouseButton1
+                or i.UserInputType==Enum.UserInputType.Touch then
                 if hConn then
                     task.cancel(hConn); hConn=nil
-                    -- toggle
-                    S[key].enabled=not S[key].enabled
-                    if key=="aimbot" then
-                        crossVis(S.aimbot.enabled)
-                        if not S.aimbot.enabled then
+                    S[mkey].enabled=not S[mkey].enabled
+                    local on=S[mkey].enabled
+                    TweenService:Create(mdot,TI,{BackgroundColor3=on and BLUE or DIM}):Play()
+                    TweenService:Create(row,TI,{BackgroundColor3=on and ROW_ON or ROW}):Play()
+                    if mkey=="aimbot" then
+                        crossVis(on)
+                        if not on then
                             if aimHL then aimHL:Destroy(); aimHL=nil end
                             aimTarget=nil; crossCol(false)
                         end
-                    elseif key=="esp" then
-                        if not S.esp.enabled then
-                            for _,d in pairs(espObjects) do
-                                for _,v in pairs(d) do
-                                    if typeof(v)=="Instance" and v:IsA("GuiObject") then v.Visible=false end
-                                end
+                    elseif mkey=="esp" and not on then
+                        for _,d in pairs(espObjs) do
+                            for _,v in pairs(d) do
+                                if typeof(v)=="Instance" then v.Visible=false end
                             end
+                            if d.edges then for _,e in ipairs(d.edges) do e.Visible=false end end
                         end
                     end
-                    refreshMod(key)
+                    reflow()
                 end
             end
         end)
     end
 
-    -- expand/collapse
-    local exp=false
-    arw.MouseButton1Click:Connect(function()
-        exp=not exp; mFrame.Visible=exp
-        arw.Text=exp and "v" or ">"
-        if catKey=="combat" then cExp=exp else vExp=exp end
-        reflow()
-    end)
+    -- Adjust panel height to tallest column after module list
+    local function resizePanel()
+        local total=#mods*MOD_H+HDR_H+PAD*2+4
+        return total
+    end
+
+    return resizePanel
 end
 
-buildCol(cCol,"Combat",combatList,"combat")
-buildCol(vCol,"Visual",visualList,"visual")
+local resizeCombat = mkCol(colsFrame, 0,              "Combat", "aimbot", {"Aimbot"})
+local resizeVisual = mkCol(colsFrame, COL_W+COL_GAP,  "Visual", "esp",   {"ESP"})
 
--- ════════════════════════ ESP OBJECT MANAGEMENT ════════════════════════
-local function mkLine(zidx)
-    local f=Instance.new("Frame")
-    f.BackgroundColor3=BLUE; f.BorderSizePixel=0
-    f.ZIndex=zidx; f.Visible=false; f.Parent=sg
-    return f
+local function resizePanel()
+    local h = math.max(resizeCombat(), resizeVisual())
+    TweenService:Create(panel,TweenInfo.new(0.18,Enum.EasingStyle.Quad),
+        {Size=UDim2.new(0,PANEL_W,0,h)}):Play()
+    TweenService:Create(colsFrame,TweenInfo.new(0.18,Enum.EasingStyle.Quad),
+        {Size=UDim2.new(1,-PAD*2,0,h-HDR_H-PAD)}):Play()
 end
+resizePanel()
 
+-- ══════════════════ ESP OBJECT MANAGEMENT ══════════════════
 local function createESP(plr)
     if plr==player then return end
     local d={}
-    d.bT=mkLine(2); d.bB=mkLine(2); d.bL=mkLine(2); d.bR=mkLine(2)
 
-    d.nameL=Instance.new("TextLabel")
-    d.nameL.BackgroundTransparency=1; d.nameL.TextColor3=Color3.fromRGB(255,255,255)
-    d.nameL.TextSize=12; d.nameL.Font=Enum.Font.GothamBold
-    d.nameL.TextStrokeTransparency=0.4; d.nameL.TextStrokeColor3=Color3.new(0,0,0)
-    d.nameL.ZIndex=3; d.nameL.Visible=false; d.nameL.Parent=sg
+    -- 3D box: 12 edge lines
+    d.edges={}
+    for _=1,12 do
+        table.insert(d.edges, mk("Frame",{
+            BackgroundColor3=ESP_C,BorderSizePixel=0,
+            AnchorPoint=Vector2.new(0,0.5),ZIndex=2,Visible=false},sg))
+    end
 
-    d.hpBg=Instance.new("Frame"); d.hpBg.BackgroundColor3=Color3.fromRGB(35,35,35)
-    d.hpBg.BorderSizePixel=0; d.hpBg.ZIndex=2; d.hpBg.Visible=false; d.hpBg.Parent=sg
-    Instance.new("UICorner",d.hpBg).CornerRadius=UDim.new(0,2)
+    -- Name label
+    d.nameL=mk("TextLabel",{BackgroundTransparency=1,TextColor3=Color3.new(1,1,1),
+        TextSize=13,Font=Enum.Font.GothamBold,TextStrokeTransparency=0.35,
+        TextStrokeColor3=Color3.new(0,0,0),ZIndex=3,Visible=false},sg)
 
-    d.hpFill=Instance.new("Frame"); d.hpFill.BackgroundColor3=GREEN
-    d.hpFill.BorderSizePixel=0; d.hpFill.ZIndex=3; d.hpFill.Parent=d.hpBg
-    Instance.new("UICorner",d.hpFill).CornerRadius=UDim.new(0,2)
+    -- Health bar (bg + fill)
+    d.hpBg=corner(mk("Frame",{BackgroundColor3=Color3.fromRGB(30,30,30),
+        BorderSizePixel=0,ZIndex=2,Visible=false},sg),2)
+    d.hpFill=corner(mk("Frame",{BackgroundColor3=GREEN,BorderSizePixel=0,ZIndex=3},d.hpBg),2)
 
-    d.distL=Instance.new("TextLabel")
-    d.distL.BackgroundTransparency=1; d.distL.TextColor3=DIM
-    d.distL.TextSize=11; d.distL.Font=Enum.Font.Gotham
-    d.distL.TextStrokeTransparency=0.5; d.distL.TextStrokeColor3=Color3.new(0,0,0)
-    d.distL.ZIndex=3; d.distL.Visible=false; d.distL.Parent=sg
+    -- Distance label
+    d.distL=mk("TextLabel",{BackgroundTransparency=1,TextColor3=DIM,
+        TextSize=11,Font=Enum.Font.Gotham,TextStrokeTransparency=0.5,
+        TextStrokeColor3=Color3.new(0,0,0),ZIndex=3,Visible=false},sg)
 
-    d.tracer=Instance.new("Frame"); d.tracer.BackgroundColor3=BLUE
-    d.tracer.BorderSizePixel=0; d.tracer.AnchorPoint=Vector2.new(0,0.5)
-    d.tracer.ZIndex=1; d.tracer.Visible=false; d.tracer.Parent=sg
+    -- Tracer (from crosshair center to player)
+    d.tracer=mk("Frame",{BackgroundColor3=ESP_C,BorderSizePixel=0,
+        AnchorPoint=Vector2.new(0,0.5),ZIndex=1,Visible=false},sg)
 
-    espObjects[plr.UserId]=d
+    espObjs[plr.UserId]=d
 end
 
 local function hideESP(d)
     if not d then return end
-    d.bT.Visible=false; d.bB.Visible=false; d.bL.Visible=false; d.bR.Visible=false
-    d.nameL.Visible=false; d.hpBg.Visible=false; d.distL.Visible=false; d.tracer.Visible=false
+    for _,e in ipairs(d.edges or {}) do e.Visible=false end
+    d.nameL.Visible=false; d.hpBg.Visible=false
+    d.distL.Visible=false; d.tracer.Visible=false
 end
 
 local function removeESP(plr)
-    local d=espObjects[plr.UserId]; if not d then return end
+    local d=espObjs[plr.UserId]; if not d then return end
+    for _,e in ipairs(d.edges or {}) do e:Destroy() end
     for _,v in pairs(d) do if typeof(v)=="Instance" then v:Destroy() end end
-    espObjects[plr.UserId]=nil
+    espObjs[plr.UserId]=nil
 end
 
-local function updateESPFor(plr)
-    local d=espObjects[plr.UserId]; if not d then return end
-    local es=S.esp
-    if not es.enabled then hideESP(d); return end
-
+local function updateESP(plr)
+    local d=espObjs[plr.UserId]; if not d then return end
+    if not S.esp.enabled then hideESP(d); return end
     local char=plr.Character
     local hrp=char and char:FindFirstChild("HumanoidRootPart")
     local hum=char and char:FindFirstChildOfClass("Humanoid")
-    if not hrp or not hum then hideESP(d); return end
+    if not hrp or not hum or hum.Health<=0 then hideESP(d); return end
 
-    local sp,onS=camera:WorldToViewportPoint(hrp.Position)
+    -- Screen position of center
+    local sp,onS = camera:WorldToViewportPoint(hrp.Position)
     if not onS or sp.Z<=0 then hideESP(d); return end
 
-    -- box
-    local topS=camera:WorldToViewportPoint(hrp.Position+Vector3.new(0,2.9,0))
-    local botS=camera:WorldToViewportPoint(hrp.Position+Vector3.new(0,-3.1,0))
-    local bH=math.abs(botS.Y-topS.Y); local bW=bH*0.54
-    local bX=sp.X-bW/2; local bY=math.min(topS.Y,botS.Y); local lt=1.5
+    -- ─── 3D BOX ───
+    if S.esp.box then
+        local cf=hrp.CFrame
+        -- project all 8 corners
+        local px,py,pz={},{},{}
+        for i,offset in ipairs(CORNERS) do
+            local wp=cf:PointToWorldSpace(offset)
+            local s=camera:WorldToViewportPoint(wp)
+            px[i]=s.X; py[i]=s.Y; pz[i]=s.Z
+        end
+        for i,ep in ipairs(EDGES) do
+            local a,b=ep[1],ep[2]
+            drawEdge(d.edges[i], px[a],py[a],pz[a], px[b],py[b],pz[b])
+            d.edges[i].BackgroundColor3=ESP_C
+        end
+    else
+        for _,e in ipairs(d.edges) do e.Visible=false end
+    end
 
-    d.bT.Size=UDim2.new(0,bW,0,lt); d.bT.Position=UDim2.new(0,bX,0,bY);         d.bT.Visible=es.box
-    d.bB.Size=UDim2.new(0,bW,0,lt); d.bB.Position=UDim2.new(0,bX,0,bY+bH-lt);   d.bB.Visible=es.box
-    d.bL.Size=UDim2.new(0,lt,0,bH); d.bL.Position=UDim2.new(0,bX,0,bY);         d.bL.Visible=es.box
-    d.bR.Size=UDim2.new(0,lt,0,bH); d.bR.Position=UDim2.new(0,bX+bW-lt,0,bY);   d.bR.Visible=es.box
-
-    -- name
-    if es.showName then
+    -- ─── NAME ───
+    -- estimate box top
+    local topSp=camera:WorldToViewportPoint(hrp.Position+Vector3.new(0,YT,0))
+    if S.esp.showName then
         d.nameL.Text=plr.Name
-        d.nameL.Size=UDim2.new(0,bW+10,0,16)
-        d.nameL.Position=UDim2.new(0,bX-5,0,bY-18)
+        d.nameL.Size=UDim2.new(0,120,0,16)
+        d.nameL.Position=UDim2.new(0,sp.X-60,0,math.min(topSp.Y,sp.Y)-20)
         d.nameL.Visible=true
     else d.nameL.Visible=false end
 
-    -- health bar (left side, vertical)
-    if es.health then
+    -- ─── HEALTH BAR ───
+    if S.esp.health then
+        local botSp=camera:WorldToViewportPoint(hrp.Position+Vector3.new(0,YB,0))
+        local bh=math.abs(topSp.Y-botSp.Y)
+        local topY=math.min(topSp.Y,botSp.Y)
         local pct=math.clamp(hum.Health/math.max(hum.MaxHealth,1),0,1)
-        d.hpBg.Size=UDim2.new(0,4,0,bH)
-        d.hpBg.Position=UDim2.new(0,bX-8,0,bY)
+        d.hpBg.Size=UDim2.new(0,4,0,bh)
+        d.hpBg.Position=UDim2.new(0,sp.X-18,0,topY)
         d.hpBg.Visible=true
-        local fillH=math.max(2,bH*pct)
-        d.hpFill.Size=UDim2.new(1,0,0,fillH)
-        d.hpFill.Position=UDim2.new(0,0,1,-fillH)
+        local fh=math.max(2,bh*pct)
+        d.hpFill.Size=UDim2.new(1,0,0,fh)
+        d.hpFill.Position=UDim2.new(0,0,1,-fh)
         d.hpFill.BackgroundColor3=pct>0.6 and GREEN or (pct>0.3 and YLW or RED)
     else d.hpBg.Visible=false end
 
-    -- distance
-    if es.distance and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-        local dist=math.floor((hrp.Position-player.Character.HumanoidRootPart.Position).Magnitude)
-        d.distL.Text=dist.."m"
-        d.distL.Size=UDim2.new(0,bW,0,14)
-        d.distL.Position=UDim2.new(0,bX,0,bY+bH+3)
-        d.distL.Visible=true
+    -- ─── DISTANCE ───
+    if S.esp.distance then
+        local lc=player.Character
+        local lhrp=lc and lc:FindFirstChild("HumanoidRootPart")
+        if lhrp then
+            local dist=math.floor((hrp.Position-lhrp.Position).Magnitude)
+            local botSp2=camera:WorldToViewportPoint(hrp.Position+Vector3.new(0,YB,0))
+            d.distL.Text=dist.." m"
+            d.distL.Size=UDim2.new(0,80,0,14)
+            d.distL.Position=UDim2.new(0,sp.X-40,0,math.max(topSp.Y,botSp2.Y)+4)
+            d.distL.Visible=true
+        end
     else d.distL.Visible=false end
 
-    -- tracer
-    if es.tracer then
-        local vps=camera.ViewportSize
-        local x1,y1=vps.X/2,vps.Y
-        local x2,y2=sp.X,sp.Y
-        local dx,dy=x2-x1,y2-y1
-        local len=math.sqrt(dx*dx+dy*dy)
-        d.tracer.Size=UDim2.new(0,len,0,1)
-        d.tracer.Position=UDim2.new(0,x1,0,y1)
-        d.tracer.Rotation=math.deg(math.atan2(dy,dx))
-        d.tracer.Visible=true
+    -- ─── TRACER (from crosshair center to player feet) ───
+    if S.esp.tracer then
+        local vp=camera.ViewportSize
+        local cx,cy=vp.X/2,vp.Y/2          -- crosshair = screen center
+        local botSp3=camera:WorldToViewportPoint(hrp.Position+Vector3.new(0,YB,0))
+        local ex,ey=botSp3.X,botSp3.Y       -- target feet
+        local dx,dy=ex-cx,ey-cy
+        local ln=math.sqrt(dx*dx+dy*dy)
+        if ln>1 then
+            d.tracer.Position=UDim2.new(0,cx,0,cy)
+            d.tracer.Size=UDim2.new(0,ln,0,1.2)
+            d.tracer.Rotation=math.deg(math.atan2(dy,dx))
+            d.tracer.Visible=true
+        else d.tracer.Visible=false end
     else d.tracer.Visible=false end
 end
 
--- ════════════════════════ AIMBOT LOGIC ════════════════════════
+-- ══════════════════ AIMBOT ══════════════════
 local function hasLOS(char)
     local hrp=char:FindFirstChild("HumanoidRootPart"); if not hrp then return false end
+    local p=RaycastParams.new()
+    p.FilterType=Enum.RaycastFilterType.Exclude
+    p.FilterDescendantsInstances={player.Character, char}
     local origin=camera.CFrame.Position
-    local dir=hrp.Position-origin
-    local params=RaycastParams.new()
-    params.FilterType=Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances={player.Character, char}
-    return workspace:Raycast(origin, dir, params)==nil
+    local hit=workspace:Raycast(origin,(hrp.Position-origin),p)
+    return hit==nil
 end
 
 local function getAimTarget()
@@ -549,7 +604,6 @@ local function getAimTarget()
     local vp=camera.ViewportSize
     local cx,cy=vp.X/2,vp.Y/2
     local best,bestD=nil,math.huge
-
     for _,t in ipairs(Players:GetPlayers()) do
         if t==player then continue end
         local ch=t.Character; if not ch then continue end
@@ -557,13 +611,10 @@ local function getAimTarget()
         local hum=ch:FindFirstChildOfClass("Humanoid")
         if not hum or hum.Health<=0 then continue end
         if not S.aimbot.throughWalls and not hasLOS(ch) then continue end
-
         local sp,onS=camera:WorldToViewportPoint(hrp.Position)
         if not onS or sp.Z<=0 then continue end
-        local d2=(Vector2.new(sp.X,sp.Y)-Vector2.new(cx,cy)).Magnitude
-        if d2<=S.aimbot.circleSize and d2<bestD then
-            bestD=d2; best=t
-        end
+        local d=(Vector2.new(sp.X,sp.Y)-Vector2.new(cx,cy)).Magnitude
+        if d<=S.aimbot.radius and d<bestD then bestD=d; best=t end
     end
     return best
 end
@@ -573,54 +624,75 @@ local function clearAimHL()
 end
 
 local function applyAimHL(char)
-    clearAimHL()
-    if not char then return end
+    clearAimHL(); if not char then return end
     local hl=Instance.new("Highlight")
     hl.FillColor=Color3.fromRGB(255,0,0); hl.FillTransparency=0.15
     hl.OutlineColor=Color3.fromRGB(255,80,80); hl.OutlineTransparency=0
     hl.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop; hl.Parent=char
     aimHL=hl
-    -- pulse
     local function pulse()
         if not hl or not hl.Parent then return end
-        TweenService:Create(hl,TweenInfo.new(0.22,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut),{FillTransparency=0.72}):Play()
-        task.delay(0.22,function()
+        TweenService:Create(hl,TweenInfo.new(0.2,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut),
+            {FillTransparency=0.75}):Play()
+        task.delay(0.2,function()
             if not hl or not hl.Parent then return end
-            TweenService:Create(hl,TweenInfo.new(0.22,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut),{FillTransparency=0.0}):Play()
-            task.delay(0.22,pulse)
+            TweenService:Create(hl,TweenInfo.new(0.2,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut),
+                {FillTransparency=0.0}):Play()
+            task.delay(0.2,pulse)
         end)
     end
     pulse()
 end
 
+-- Auto shoot — tool:Activate() is the most mobile-safe approach.
+-- Also fires any RemoteEvent with common shoot keywords as fallback.
 local function doShoot()
-    if not player.Character then return end
-    local tool=player.Character:FindFirstChildOfClass("Tool")
-    if tool then tool:Activate() end
+    local char=player.Character; if not char then return end
+    local tool=char:FindFirstChildOfClass("Tool"); if not tool then return end
+
+    -- Try standard activation first
+    pcall(function() tool:Activate() end)
+
+    -- Fallback: fire any remote that looks like a shoot/attack remote
+    pcall(function()
+        for _,v in ipairs(tool:GetDescendants()) do
+            if v:IsA("RemoteEvent") then
+                local n=v.Name:lower()
+                if n:find("shoot") or n:find("fire") or n:find("attack") or n:find("hit") then
+                    local hrp=char:FindFirstChild("HumanoidRootPart")
+                    local target=aimTarget and aimTarget.Character
+                        and aimTarget.Character:FindFirstChild("HumanoidRootPart")
+                    if hrp and target then
+                        v:FireServer(target.Position)
+                    else
+                        v:FireServer()
+                    end
+                end
+            end
+        end
+    end)
 end
 
--- ════════════════════════ PLAYER EVENTS ════════════════════════
+-- ══════════════════ PLAYER EVENTS ══════════════════
 for _,p in ipairs(Players:GetPlayers()) do createESP(p) end
 Players.PlayerAdded:Connect(createESP)
 Players.PlayerRemoving:Connect(removeESP)
 
--- ════════════════════════ RENDER LOOP ════════════════════════
+-- ══════════════════ RENDER LOOP ══════════════════
 RunService.RenderStepped:Connect(function()
-    -- ── AIMBOT ──
+    -- AIMBOT
     if S.aimbot.enabled then
         local t=getAimTarget()
-
         if t~=aimTarget then
             aimTarget=t
-            if t then
-                applyAimHL(t.Character)
-            else
-                clearAimHL()
-            end
+            if t then applyAimHL(t.Character) else clearAimHL() end
             crossCol(t~=nil)
         end
-
-        -- clean up if target died/left
+        -- Recover from respawn
+        if aimTarget and aimHL and not aimHL.Parent then
+            if aimTarget.Character then applyAimHL(aimTarget.Character) end
+        end
+        -- Death/left cleanup
         if aimTarget then
             local ch=aimTarget.Character
             local hu=ch and ch:FindFirstChildOfClass("Humanoid")
@@ -628,31 +700,22 @@ RunService.RenderStepped:Connect(function()
                 clearAimHL(); aimTarget=nil; crossCol(false)
             end
         end
-
-        -- also keep HL fresh if character changed (respawn)
-        if aimTarget and aimHL and not aimHL.Parent then
-            if aimTarget.Character then applyAimHL(aimTarget.Character) end
-        end
-
-        -- aim camera
+        -- Aim camera
         if aimTarget then
             local hrp=aimTarget.Character and aimTarget.Character:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                camera.CFrame=CFrame.new(camera.CFrame.Position, hrp.Position)
-            end
+            if hrp then camera.CFrame=CFrame.new(camera.CFrame.Position,hrp.Position) end
         end
-
-        -- auto shoot
+        -- Shoot
         if S.aimbot.autoShoot and aimTarget then
             local now=tick()
             if now-lastShot>=SHOOT_DELAY then doShoot(); lastShot=now end
         end
     end
 
-    -- ── ESP ──
+    -- ESP
     if S.esp.enabled then
         for _,p in ipairs(Players:GetPlayers()) do
-            if p~=player then updateESPFor(p) end
+            if p~=player then updateESP(p) end
         end
     end
 end)
