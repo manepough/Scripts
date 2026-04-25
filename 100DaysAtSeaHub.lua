@@ -1,11 +1,40 @@
-repeat wait() until game:IsLoaded() and game.Players.LocalPlayer
+repeat task.wait() until game:IsLoaded() and game.Players.LocalPlayer
 
-local Players          = game:GetService("Players")
-local RunService       = game:GetService("RunService")
+local Players   = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local TeleportService  = game:GetService("TeleportService")
-local Camera           = workspace.CurrentCamera
-local player           = Players.LocalPlayer
+local Camera    = workspace.CurrentCamera
+local player    = Players.LocalPlayer
+
+-- ===================== SAFE EXECUTOR WRAPPERS =====================
+-- These functions only exist in exploit executors, not plain LocalScripts
+-- Wrapping them prevents "attempt to call a nil value" crashes
+
+local function safeTouchInterest(hrp, part, toggle)
+    if typeof(firetouchinterest) == "function" then
+        pcall(firetouchinterest, hrp, part, toggle)
+    end
+end
+
+local function safeProximityPrompt(prompt)
+    if typeof(fireproximityprompt) == "function" then
+        pcall(fireproximityprompt, prompt)
+    end
+end
+
+local function safeClickDetector(det)
+    if typeof(fireclickdetector) == "function" then
+        pcall(fireclickdetector, det)
+    end
+end
+
+local function safeSetQuality(level)
+    pcall(function()
+        if settings then
+            settings().Rendering.QualityLevel = level
+        end
+    end)
+end
 
 -- ===================== STATE =====================
 
@@ -21,30 +50,26 @@ local speedBoatEnabled   = false
 local godModeEnabled     = false
 local autoEatEnabled     = false
 local serverInfoEnabled  = false
-
 local boatSpeed          = 50
-local godConn            = nil
-local speedConn          = nil
+
+local itemEspObjects = {}
 
 local NPC_KEYWORDS = {
     "enemy","monster","shark","creature","beast","crab","octopus","eel",
     "siren","leviathan","pirate","bandit","hostile","mob","npc","zombie",
-    "ghost","skeleton","seacreature","sea_creature","seaenemy","anglerfish",
-    "kraken","serpent","fish","whale","mutant"
+    "ghost","skeleton","seacreature","anglerfish","kraken","serpent","mutant"
 }
-
 local ITEM_KEYWORDS = {
     "chest","sack","loot","drop","treasure","fish","item","pickup","crate",
-    "barrel","supply","coin","gold","wood","plank","rope","sail","anchor",
-    "food","meat","bread","water","flask","potion","gun","sword","harpoon",
-    "bait","net","hook","ore","material","resource","collectible","pearl"
+    "barrel","supply","coin","gold","wood","plank","rope","sail","food",
+    "meat","bread","water","flask","potion","harpoon","bait","hook","ore",
+    "material","resource","pearl","collectible"
 }
-
-local CHEST_KEYWORDS  = {"chest","treasure","crate","barrel","loot"}
-local SACK_KEYWORDS   = {"sack","bag","drop","pickup","item","loot","supply","fish"}
-local REPAIR_KEYWORDS = {"hull","boat","ship","raft","plank","mast","sail","deck","wood"}
-local FISH_KEYWORDS   = {"fishingspot","fishspot","fishing","bobber","rod","fish"}
-local HARPOON_KEYWORDS= {"harpoon","target","harpoontarget","whale","bigfish","creature"}
+local CHEST_KEYWORDS   = {"chest","treasure","crate","barrel"}
+local SACK_KEYWORDS    = {"sack","bag","drop","pickup","loot","supply"}
+local REPAIR_KEYWORDS  = {"hull","plank","mast","sail","deck"}
+local FISH_KEYWORDS    = {"fishingspot","fishspot","bobber","fishrod"}
+local HARPOON_KEYWORDS = {"harpoontarget","whale","bigfish","kraken","leviathan"}
 
 -- ===================== HELPERS =====================
 
@@ -61,7 +86,7 @@ end
 local function nameMatch(name, keywords)
     local n = string.lower(name)
     for _, kw in ipairs(keywords) do
-        if n:find(kw) then return true end
+        if n:find(kw, 1, true) then return true end
     end
     return false
 end
@@ -70,55 +95,58 @@ local function isNPC(model)
     if not model:IsA("Model") then return false end
     local hum = model:FindFirstChildWhichIsA("Humanoid")
     if not hum then return false end
-    -- Not a player
     for _, p in ipairs(Players:GetPlayers()) do
         if p.Character == model then return false end
     end
     return true
 end
 
-local function clickBtn(btn)
-    if not btn or not btn.Parent then return end
-    pcall(function()
-        btn.MouseButton1Down:Fire()
-        task.wait(0.05)
-        btn.MouseButton1Up:Fire()
-        btn.MouseButton1Click:Fire()
-    end)
-end
-
-local function fireAllPrompts(obj)
-    for _, d in ipairs(obj:GetDescendants()) do
-        if d:IsA("ProximityPrompt") then
-            pcall(function() fireproximityprompt(d) end)
-        end
-    end
-end
-
 local function touchPart(part)
     local hrp = getHRP()
     if not hrp or not part then return end
-    pcall(function() firetouchinterest(hrp, part, 0) end)
-    pcall(function() firetouchinterest(hrp, part, 1) end)
+    safeTouchInterest(hrp, part, 0)
+    safeTouchInterest(hrp, part, 1)
+end
+
+local function fireAllPrompts(obj)
+    if not obj then return end
+    for _, d in ipairs(obj:GetDescendants()) do
+        if d:IsA("ProximityPrompt") then
+            safeProximityPrompt(d)
+        end
+        if d:IsA("ClickDetector") then
+            safeClickDetector(d)
+        end
+    end
+    -- also check obj itself
+    if obj:IsA("ProximityPrompt") then safeProximityPrompt(obj) end
+    if obj:IsA("ClickDetector")   then safeClickDetector(obj)   end
 end
 
 local function fireRemoteNamed(pattern, ...)
+    local args = {...}
     for _, obj in ipairs(game:GetDescendants()) do
         if obj:IsA("RemoteEvent") then
-            local n = string.lower(obj.Name)
-            if n:find(string.lower(pattern)) then
-                pcall(function() obj:FireServer(...) end)
+            if string.lower(obj.Name):find(string.lower(pattern), 1, true) then
+                pcall(function() obj:FireServer(table.unpack(args)) end)
             end
         end
     end
 end
 
-local function invokeRemoteNamed(pattern, ...)
-    for _, obj in ipairs(game:GetDescendants()) do
-        if obj:IsA("RemoteFunction") then
-            local n = string.lower(obj.Name)
-            if n:find(string.lower(pattern)) then
-                pcall(function() obj:InvokeServer(...) end)
+local function clickGuiBtn(pattern)
+    for _, gui in ipairs(player.PlayerGui:GetChildren()) do
+        for _, d in ipairs(gui:GetDescendants()) do
+            if (d:IsA("TextButton") or d:IsA("ImageButton")) and d.Visible then
+                local t = string.lower(d.Text or "")
+                if t:find(string.lower(pattern), 1, true) then
+                    pcall(function()
+                        d.MouseButton1Down:Fire()
+                        task.wait(0.04)
+                        d.MouseButton1Up:Fire()
+                        d.MouseButton1Click:Fire()
+                    end)
+                end
             end
         end
     end
@@ -145,7 +173,6 @@ local wStr = Instance.new("UIStroke", win)
 wStr.Color = Color3.fromRGB(30, 100, 200)
 wStr.Thickness = 1.2
 
--- Ocean blue top bar
 local topBar = Instance.new("Frame")
 topBar.Size = UDim2.new(1, 0, 0, 3)
 topBar.BackgroundColor3 = Color3.fromRGB(30, 120, 255)
@@ -198,7 +225,6 @@ local function mkDiv(parent, y)
 end
 mkDiv(win, 47)
 
--- Tabs
 local tabNames = {"Main", "Combat", "Visual", "Info"}
 local tabBtns  = {}
 local tabWidth = (310 - 24) / #tabNames
@@ -227,12 +253,11 @@ end
 mkDiv(win, 86)
 
 local content = Instance.new("Frame")
-content.Size = UDim2.new(1, -24, 0, 330)
+content.Size = UDim2.new(1, -24, 0, 336)
 content.Position = UDim2.new(0, 12, 0, 93)
 content.BackgroundTransparency = 1
 content.Parent = win
 
--- Status bar
 local statusBar = Instance.new("Frame")
 statusBar.Size = UDim2.new(1, -24, 0, 22)
 statusBar.Position = UDim2.new(0, 12, 0, 430)
@@ -438,7 +463,7 @@ local function mkSlider(parent, y, label, min, max, default, cb)
     track.InputBegan:Connect(function(i) update(i.Position.X) end)
 end
 
-local function mkInfoRow(parent, y, label, valueStr)
+local function mkInfoRow(parent, y, label)
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(1, 0, 0, 26)
     frame.Position = UDim2.new(0, 0, 0, y)
@@ -462,86 +487,13 @@ local function mkInfoRow(parent, y, label, valueStr)
     val.Size = UDim2.new(0.48, 0, 1, 0)
     val.Position = UDim2.new(0.52, 0, 0, 0)
     val.BackgroundTransparency = 1
-    val.Text = valueStr
+    val.Text = "..."
     val.TextColor3 = Color3.fromRGB(30, 180, 255)
     val.TextSize = 10
     val.Font = Enum.Font.GothamBold
     val.TextXAlignment = Enum.TextXAlignment.Right
     val.Parent = frame
-
-    return val -- return value label so we can update it
-end
-
--- ===================== ITEM ESP =====================
-
-local itemEspObjects = {}
-
-local function setupItemESP(part, label)
-    if itemEspObjects[part] then return end
-
-    local box = Instance.new("SelectionBox")
-    box.Color3 = Color3.fromRGB(30, 200, 255)
-    box.LineThickness = 0.05
-    box.SurfaceTransparency = 0.8
-    box.SurfaceColor3 = Color3.fromRGB(30, 200, 255)
-    box.Adornee = part
-    box.Parent = workspace
-
-    local bb = Instance.new("BillboardGui")
-    bb.Size = UDim2.new(0, 120, 0, 20)
-    bb.StudsOffset = Vector3.new(0, 3, 0)
-    bb.AlwaysOnTop = true
-    bb.Adornee = part
-    bb.Parent = sg
-
-    local tag = Instance.new("TextLabel")
-    tag.Size = UDim2.new(1, 0, 1, 0)
-    tag.BackgroundTransparency = 1
-    tag.Text = label or part.Name
-    tag.TextColor3 = Color3.fromRGB(30, 200, 255)
-    tag.TextSize = 11
-    tag.Font = Enum.Font.GothamBold
-    tag.TextStrokeTransparency = 0.4
-    tag.Parent = bb
-
-    itemEspObjects[part] = {box=box, bb=bb}
-end
-
-local function updateItemESP()
-    if not itemEspEnabled then return end
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        local n = string.lower(obj.Name)
-        local isItem = false
-        for _, kw in ipairs(ITEM_KEYWORDS) do
-            if n:find(kw) then isItem = true break end
-        end
-        if isItem and not obj:FindFirstChildWhichIsA("Humanoid") then
-            local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
-            if part and not itemEspObjects[part] then
-                setupItemESP(part, obj.Name)
-            end
-        end
-    end
-    -- cleanup
-    for part, t in pairs(itemEspObjects) do
-        if not part or not part.Parent then
-            pcall(function()
-                if t.box then t.box:Destroy() end
-                if t.bb  then t.bb:Destroy()  end
-            end)
-            itemEspObjects[part] = nil
-        end
-    end
-end
-
-local function clearItemESP()
-    for part, t in pairs(itemEspObjects) do
-        pcall(function()
-            if t.box then t.box:Destroy() end
-            if t.bb  then t.bb:Destroy()  end
-        end)
-    end
-    itemEspObjects = {}
+    return val
 end
 
 -- ===================== MAIN TAB =====================
@@ -568,10 +520,7 @@ mkLabel(mTab, 148, "BOAT")
 
 mkToggle(mTab, 162, "Speed Boat", function(on)
     speedBoatEnabled = on
-    if not on then
-        if speedConn then speedConn:Disconnect() speedConn = nil end
-    end
-    setStatus(on and "Speed Boat ON - " .. boatSpeed or "Speed Boat OFF")
+    setStatus(on and "Speed Boat ON" or "Speed Boat OFF")
 end)
 
 mkSlider(mTab, 204, "Boat Speed", 10, 200, 50, function(val)
@@ -594,16 +543,15 @@ end)
 -- ===================== COMBAT TAB =====================
 
 local cTab = pages["Combat"]
-mkLabel(cTab, 0, "COMBAT - NPC ONLY")
+mkLabel(cTab, 0, "COMBAT - NPC / MONSTERS ONLY")
 
-mkToggle(cTab, 14, "Kill Aura (NPC/Monsters)", function(on)
+mkToggle(cTab, 14, "Kill Aura", function(on)
     killAuraEnabled = on
     setStatus(on and "Kill Aura ON" or "Kill Aura OFF")
 end)
 
 mkSlider(cTab, 56, "Aura Radius", 5, 150, 30, function(val)
     killAuraRadius = val
-    setStatus("Kill Aura radius: " .. val)
 end)
 
 mkLabel(cTab, 112, "FISHING")
@@ -625,7 +573,15 @@ mkLabel(vTab, 0, "ITEM ESP")
 
 mkToggle(vTab, 14, "Item ESP", function(on)
     itemEspEnabled = on
-    if not on then clearItemESP() end
+    if not on then
+        for _, t in pairs(itemEspObjects) do
+            pcall(function()
+                if t.box then t.box:Destroy() end
+                if t.bb  then t.bb:Destroy()  end
+            end)
+        end
+        itemEspObjects = {}
+    end
     setStatus(on and "Item ESP ON" or "Item ESP OFF")
 end)
 
@@ -634,131 +590,104 @@ end)
 local iTab = pages["Info"]
 mkLabel(iTab, 0, "SERVER INFO")
 
-local infoRows = {}
-local infoData = {
-    {"Server ID",    "..."},
-    {"Players",      "..."},
-    {"Map/Region",   "..."},
-    {"Day",          "..."},
-    {"Your Position","..."},
-    {"Your Health",  "..."},
-    {"Ping",         "..."},
-    {"Server Time",  "..."},
-}
-
-for i, pair in ipairs(infoData) do
-    infoRows[pair[1]] = mkInfoRow(iTab, 14 + (i-1)*32, pair[1], pair[2])
+local infoLabels = {"Server ID","Players","Your Position","Your Health","Ping","Server Time","Day","Map Seed"}
+local infoRows   = {}
+for i, lbl in ipairs(infoLabels) do
+    infoRows[lbl] = mkInfoRow(iTab, 14 + (i-1)*30, lbl)
 end
 
-local function updateServerInfo()
-    if not serverInfoEnabled then return end
-
-    -- Server ID (job ID)
-    pcall(function()
-        infoRows["Server ID"].Text = game.JobId ~= "" and game.JobId:sub(1,12).."..." or "Private"
-    end)
-
-    -- Player count
-    pcall(function()
-        infoRows["Players"].Text = #Players:GetPlayers() .. " / " .. Players.MaxPlayers
-    end)
-
-    -- Map
-    pcall(function()
-        infoRows["Map/Region"].Text = game.PlaceId and tostring(game.PlaceId) or "Unknown"
-    end)
-
-    -- Day (look for a day counter in workspace or PlayerGui)
-    pcall(function()
-        local dayVal = nil
-        for _, obj in ipairs(workspace:GetDescendants()) do
-            if obj:IsA("IntValue") or obj:IsA("NumberValue") then
-                local n = string.lower(obj.Name)
-                if n:find("day") then dayVal = obj.Value break end
-            end
-        end
-        if not dayVal then
-            for _, gui in ipairs(player.PlayerGui:GetChildren()) do
-                for _, d in ipairs(gui:GetDescendants()) do
-                    if d:IsA("TextLabel") then
-                        local t = d.Text or ""
-                        local v = t:match("Day%s*(%d+)")
-                        if v then dayVal = v break end
-                    end
-                end
-            end
-        end
-        infoRows["Day"].Text = dayVal and tostring(dayVal) or "Unknown"
-    end)
-
-    -- Position
-    pcall(function()
-        local hrp = getHRP()
-        if hrp then
-            local p = hrp.Position
-            infoRows["Your Position"].Text = string.format("%.0f, %.0f, %.0f", p.X, p.Y, p.Z)
-        end
-    end)
-
-    -- Health
-    pcall(function()
-        local hum = getHum()
-        if hum then
-            infoRows["Your Health"].Text = math.floor(hum.Health) .. " / " .. math.floor(hum.MaxHealth)
-        end
-    end)
-
-    -- Ping
-    pcall(function()
-        local stats = game:GetService("Stats")
-        local ping = stats.Network.ServerStatsItem["Data Ping"]:GetValue()
-        infoRows["Ping"].Text = math.floor(ping) .. " ms"
-    end)
-
-    -- Server time
-    pcall(function()
-        infoRows["Server Time"].Text = string.format("%.0fs", workspace.DistributedGameTime)
-    end)
-end
-
--- Toggle server info auto-refresh
-mkToggle(iTab, 14 + #infoData*32 + 8, "Auto Refresh Info", function(on)
+mkToggle(iTab, 14 + #infoLabels*30 + 6, "Auto Refresh", function(on)
     serverInfoEnabled = on
     setStatus(on and "Server Info ON" or "Server Info OFF")
 end)
 
--- ===================== FEATURE LOGIC =====================
+-- ===================== ITEM ESP LOGIC =====================
 
--- GOD MODE
-local function doGodMode()
-    if not godModeEnabled then return end
-    local hum = getHum()
-    if hum then
-        pcall(function()
-            hum.Health = hum.MaxHealth
-            -- Also try to fire any god mode remote
-            fireRemoteNamed("godmode")
-            fireRemoteNamed("sethealth")
-        end)
+local function updateItemESP()
+    if not itemEspEnabled then return end
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if not obj:FindFirstChildWhichIsA("Humanoid") then
+            local n = string.lower(obj.Name)
+            local isItem = false
+            for _, kw in ipairs(ITEM_KEYWORDS) do
+                if n:find(kw, 1, true) then isItem = true break end
+            end
+            if isItem then
+                local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
+                if part and not itemEspObjects[part] then
+                    local ok, box = pcall(function()
+                        local b = Instance.new("SelectionBox")
+                        b.Color3 = Color3.fromRGB(30, 200, 255)
+                        b.LineThickness = 0.05
+                        b.SurfaceTransparency = 0.8
+                        b.SurfaceColor3 = Color3.fromRGB(30, 200, 255)
+                        b.Adornee = part
+                        b.Parent = workspace
+                        return b
+                    end)
+                    local ok2, bb = pcall(function()
+                        local gui = Instance.new("BillboardGui")
+                        gui.Size = UDim2.new(0, 120, 0, 20)
+                        gui.StudsOffset = Vector3.new(0, 3, 0)
+                        gui.AlwaysOnTop = true
+                        gui.Adornee = part
+                        gui.Parent = sg
+                        local tag = Instance.new("TextLabel")
+                        tag.Size = UDim2.new(1, 0, 1, 0)
+                        tag.BackgroundTransparency = 1
+                        tag.Text = obj.Name
+                        tag.TextColor3 = Color3.fromRGB(30, 200, 255)
+                        tag.TextSize = 11
+                        tag.Font = Enum.Font.GothamBold
+                        tag.TextStrokeTransparency = 0.4
+                        tag.Parent = gui
+                        return gui
+                    end)
+                    itemEspObjects[part] = {
+                        box = ok and box or nil,
+                        bb  = ok2 and bb or nil
+                    }
+                end
+            end
+        end
+    end
+    -- cleanup
+    for part, t in pairs(itemEspObjects) do
+        if not part or not part.Parent then
+            pcall(function() if t.box then t.box:Destroy() end end)
+            pcall(function() if t.bb  then t.bb:Destroy()  end end)
+            itemEspObjects[part] = nil
+        end
     end
 end
 
--- AUTO EAT / DRINK
+-- ===================== FEATURE LOGIC =====================
+
+local function doGodMode()
+    if not godModeEnabled then return end
+    pcall(function()
+        local hum = getHum()
+        if hum then hum.Health = hum.MaxHealth end
+    end)
+end
+
 local function doAutoEat()
     if not autoEatEnabled then return end
-    -- Fire food/drink remotes
     fireRemoteNamed("eat")
     fireRemoteNamed("drink")
     fireRemoteNamed("consume")
-    -- Touch nearby food/water items
+    fireRemoteNamed("hunger")
+    fireRemoteNamed("thirst")
+    clickGuiBtn("eat")
+    clickGuiBtn("drink")
     local hrp = getHRP()
     if not hrp then return end
     for _, obj in ipairs(workspace:GetDescendants()) do
         local n = string.lower(obj.Name)
-        if n:find("food") or n:find("water") or n:find("drink") or n:find("eat")
-        or n:find("apple") or n:find("meat") or n:find("fish") or n:find("bread") then
+        if n:find("food",1,true) or n:find("water",1,true) or n:find("drink",1,true)
+        or n:find("apple",1,true) or n:find("meat",1,true) or n:find("bread",1,true) then
             local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
-            if part and (hrp.Position - part.Position).Magnitude < 10 then
+            if part and (hrp.Position - part.Position).Magnitude < 12 then
                 touchPart(part)
                 fireAllPrompts(obj)
             end
@@ -766,186 +695,128 @@ local function doAutoEat()
     end
 end
 
--- KILL AURA (NPC only)
 local function doKillAura()
     if not killAuraEnabled then return end
     local hrp = getHRP()
     if not hrp then return end
-
     for _, obj in ipairs(workspace:GetDescendants()) do
         if isNPC(obj) then
             local root = obj:FindFirstChild("HumanoidRootPart")
                 or obj:FindFirstChildWhichIsA("BasePart")
-            if root then
-                local dist = (hrp.Position - root.Position).Magnitude
-                if dist <= killAuraRadius then
-                    local hum = obj:FindFirstChildWhichIsA("Humanoid")
-                    if hum and hum.Health > 0 then
-                        pcall(function() hum:TakeDamage(math.huge) end)
-                        -- Touch attack
-                        for _, part in ipairs(obj:GetDescendants()) do
-                            if part:IsA("BasePart") then
-                                touchPart(part)
-                            end
-                        end
-                        -- Try attack remotes
-                        fireRemoteNamed("attack")
-                        fireRemoteNamed("damage")
-                        fireRemoteNamed("hit")
-                    end
+            if root and (hrp.Position - root.Position).Magnitude <= killAuraRadius then
+                local hum = obj:FindFirstChildWhichIsA("Humanoid")
+                if hum and hum.Health > 0 then
+                    pcall(function() hum:TakeDamage(9999) end)
+                    touchPart(root)
+                    fireRemoteNamed("attack")
+                    fireRemoteNamed("hit")
+                    fireRemoteNamed("damage")
                 end
             end
         end
     end
 end
 
--- AUTO OPEN CHESTS
 local function doAutoChest()
     if not autoChestEnabled then return end
     local hrp = getHRP()
     if not hrp then return end
-
     for _, obj in ipairs(workspace:GetDescendants()) do
         if nameMatch(obj.Name, CHEST_KEYWORDS) then
             local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
-            if part then
-                local dist = (hrp.Position - part.Position).Magnitude
-                if dist < 30 then
-                    -- TP to chest
-                    hrp.CFrame = part.CFrame * CFrame.new(0, 3, 0)
-                    task.wait(0.1)
-                    -- Fire all prompts
-                    fireAllPrompts(obj)
-                    touchPart(part)
-                    -- Try open remotes
-                    fireRemoteNamed("openchest")
-                    fireRemoteNamed("open")
-                    fireRemoteNamed("loot")
-                    task.wait(0.3)
-                end
+            if part and (hrp.Position - part.Position).Magnitude < 40 then
+                -- TP close to it
+                pcall(function() hrp.CFrame = part.CFrame * CFrame.new(0, 3, 0) end)
+                task.wait(0.1)
+                fireAllPrompts(obj)
+                touchPart(part)
+                fireRemoteNamed("openchest")
+                fireRemoteNamed("open")
+                fireRemoteNamed("loot")
+                task.wait(0.2)
             end
         end
     end
 end
 
--- AUTO SACK ITEMS
 local function doAutoSack()
     if not autoSackEnabled then return end
     local hrp = getHRP()
     if not hrp then return end
-
     for _, obj in ipairs(workspace:GetDescendants()) do
         if nameMatch(obj.Name, SACK_KEYWORDS) and not obj:FindFirstChildWhichIsA("Humanoid") then
             local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
-            if part then
-                local dist = (hrp.Position - part.Position).Magnitude
-                if dist < 20 then
-                    touchPart(part)
-                    fireAllPrompts(obj)
-                    fireRemoteNamed("pickup")
-                    fireRemoteNamed("collect")
-                    fireRemoteNamed("sack")
-                    fireRemoteNamed("grab")
-                end
+            if part and (hrp.Position - part.Position).Magnitude < 20 then
+                touchPart(part)
+                fireAllPrompts(obj)
+                fireRemoteNamed("pickup")
+                fireRemoteNamed("collect")
+                fireRemoteNamed("sack")
+                fireRemoteNamed("grab")
             end
         end
     end
 end
 
--- AUTO REPAIR BOAT
 local function doAutoRepair()
     if not autoRepairEnabled then return end
     local hrp = getHRP()
     if not hrp then return end
-
     for _, obj in ipairs(workspace:GetDescendants()) do
         if nameMatch(obj.Name, REPAIR_KEYWORDS) then
-            local part = obj:IsA("BasePart") and obj
-                or obj:FindFirstChildWhichIsA("BasePart")
-            if part then
-                -- Check if it has a health value indicating damage
-                local health = obj:FindFirstChild("Health") or obj:FindFirstChild("Durability")
-                if health and health.Value < (health.MaxValue or 100) then
-                    touchPart(part)
-                    fireAllPrompts(obj)
-                    fireRemoteNamed("repair")
-                    fireRemoteNamed("fix")
-                    fireRemoteNamed("patch")
-                elseif not health then
-                    -- blindly fire repair remote near boat parts
-                    fireRemoteNamed("repair")
-                end
+            local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
+            if part and (hrp.Position - part.Position).Magnitude < 25 then
+                touchPart(part)
+                fireAllPrompts(obj)
+                fireRemoteNamed("repair")
+                fireRemoteNamed("fix")
+                fireRemoteNamed("patch")
             end
         end
     end
 end
 
--- SPEED BOAT
 local function doSpeedBoat()
     if not speedBoatEnabled then return end
     local hrp = getHRP()
     if not hrp then return end
-
-    -- Find seat/vehicle seat the player might be sitting in
-    local char = player.Character
-    if not char then return end
-
-    -- Method 1: find VehicleSeat
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("VehicleSeat") then
-            if obj.Occupant and obj.Occupant.Parent == char then
-                pcall(function()
+    pcall(function()
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("VehicleSeat") and obj.Occupant then
+                local char = player.Character
+                if char and obj.Occupant.Parent == char then
                     obj.MaxSpeed = boatSpeed
                     obj.Throttle = 1
-                end)
+                end
             end
-        end
-    end
-
-    -- Method 2: BodyVelocity on boat hull parts
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if nameMatch(obj.Name, {"boat","ship","raft","vessel","hull"}) then
-            if obj:IsA("BasePart") then
-                local dist = (hrp.Position - obj.Position).Magnitude
-                if dist < 20 then
-                    local bv = obj:FindFirstChildWhichIsA("BodyVelocity")
-                    if bv then
-                        pcall(function()
-                            bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-                            local dir = obj.CFrame.LookVector
-                            bv.Velocity = dir * boatSpeed
-                        end)
+            -- BodyVelocity on nearby boat parts
+            if obj:IsA("BodyVelocity") then
+                local p = obj.Parent
+                if p and p:IsA("BasePart") then
+                    local n = string.lower(p.Name)
+                    if (n:find("boat",1,true) or n:find("ship",1,true) or n:find("raft",1,true) or n:find("hull",1,true))
+                    and (hrp.Position - p.Position).Magnitude < 20 then
+                        obj.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+                        obj.Velocity = p.CFrame.LookVector * boatSpeed
                     end
                 end
             end
         end
-    end
-
-    -- Method 3: Fire speed remote
-    fireRemoteNamed("setspeed")
-    fireRemoteNamed("boatspeed")
+        fireRemoteNamed("setspeed")
+        fireRemoteNamed("boostboat")
+    end)
 end
 
--- AUTO FISH
 local function doAutoFish()
     if not autoFishEnabled then return end
-    -- Cast rod remote
     fireRemoteNamed("castrod")
-    fireRemoteNamed("throwrod")
     fireRemoteNamed("fish")
     fireRemoteNamed("castline")
-    -- Click any fish buttons
-    for _, gui in ipairs(player.PlayerGui:GetChildren()) do
-        for _, d in ipairs(gui:GetDescendants()) do
-            if (d:IsA("TextButton") or d:IsA("ImageButton")) and d.Visible then
-                local t = string.lower(d.Text or "")
-                if t:find("fish") or t:find("cast") or t:find("reel") or t:find("catch") then
-                    clickBtn(d)
-                end
-            end
-        end
-    end
-    -- Proximity prompts near fishing spots
+    fireRemoteNamed("reel")
+    fireRemoteNamed("catch")
+    clickGuiBtn("fish")
+    clickGuiBtn("cast")
+    clickGuiBtn("reel")
     local hrp = getHRP()
     if not hrp then return end
     for _, obj in ipairs(workspace:GetDescendants()) do
@@ -959,65 +830,105 @@ local function doAutoFish()
     end
 end
 
--- AUTO HARPOON
 local function doAutoHarpoon()
     if not autoHarpoonEnabled then return end
     local hrp = getHRP()
     if not hrp then return end
-
-    -- Find nearest harpoon target (big sea creature/whale)
     local best, bestDist = nil, math.huge
     for _, obj in ipairs(workspace:GetDescendants()) do
         if nameMatch(obj.Name, HARPOON_KEYWORDS) then
             local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
             if part then
                 local dist = (hrp.Position - part.Position).Magnitude
-                if dist < bestDist then
-                    bestDist = dist
-                    best = part
-                end
+                if dist < bestDist then bestDist = dist best = part end
             end
         end
     end
-
     if best then
-        -- Fire harpoon remote toward target
+        pcall(function()
+            Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, best.Position)
+        end)
         fireRemoteNamed("harpoon")
         fireRemoteNamed("throw")
         fireRemoteNamed("shoot")
-        -- Aim camera at target
-        local cf = Camera.CFrame
-        Camera.CFrame = cf:Lerp(CFrame.lookAt(cf.Position, best.Position), 0.5)
-        -- Touch target
         touchPart(best)
-        fireAllPrompts(best.Parent or best)
-        setStatus("Auto Harpoon: targeting " .. best.Name .. " (" .. math.floor(bestDist) .. " studs)")
+        setStatus("Harpooning: " .. best.Name .. " (" .. math.floor(bestDist) .. " studs)")
     end
 end
 
--- ===================== HEARTBEAT LOOP =====================
+local function doServerInfo()
+    if not serverInfoEnabled then return end
+    pcall(function() infoRows["Server ID"].Text = game.JobId ~= "" and game.JobId:sub(1,10).."…" or "Private" end)
+    pcall(function() infoRows["Players"].Text = #Players:GetPlayers() .. "/" .. Players.MaxPlayers end)
+    pcall(function()
+        local hrp = getHRP()
+        if hrp then
+            local p = hrp.Position
+            infoRows["Your Position"].Text = string.format("%.0f,%.0f,%.0f", p.X, p.Y, p.Z)
+        end
+    end)
+    pcall(function()
+        local hum = getHum()
+        if hum then
+            infoRows["Your Health"].Text = math.floor(hum.Health) .. "/" .. math.floor(hum.MaxHealth)
+        end
+    end)
+    pcall(function()
+        local s = game:GetService("Stats")
+        local ping = s.Network.ServerStatsItem["Data Ping"]:GetValue()
+        infoRows["Ping"].Text = math.floor(ping) .. " ms"
+    end)
+    pcall(function()
+        infoRows["Server Time"].Text = string.format("%.0fs", workspace.DistributedGameTime)
+    end)
+    pcall(function()
+        -- Day counter: search workspace values
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if (obj:IsA("IntValue") or obj:IsA("NumberValue")) and string.lower(obj.Name):find("day",1,true) then
+                infoRows["Day"].Text = tostring(obj.Value)
+                break
+            end
+        end
+    end)
+    pcall(function()
+        -- Map seed shown in UI bottom right in the screenshot: "Map Seed: 1777103967"
+        for _, gui in ipairs(player.PlayerGui:GetChildren()) do
+            for _, d in ipairs(gui:GetDescendants()) do
+                if d:IsA("TextLabel") then
+                    local seed = (d.Text or ""):match("Map Seed:%s*(%d+)")
+                    if seed then
+                        infoRows["Map Seed"].Text = seed
+                        break
+                    end
+                end
+            end
+        end
+    end)
+end
+
+-- ===================== MAIN LOOPS =====================
 
 local ticker = 0
 RunService.Heartbeat:Connect(function(dt)
     ticker += dt
+    -- Every frame: god mode, kill aura, speed boat
+    pcall(doGodMode)
+    pcall(doKillAura)
+    pcall(doSpeedBoat)
 
-    doGodMode()
-    doKillAura()
-    doSpeedBoat()
-
-    -- These run every 0.5s to avoid spam
+    -- Every 0.5s: everything else
     if ticker >= 0.5 then
         ticker = 0
-        doAutoEat()
-        doAutoChest()
-        doAutoSack()
-        doAutoRepair()
-        doAutoFish()
-        doAutoHarpoon()
-        updateItemESP()
-        updateServerInfo()
+        pcall(doAutoEat)
+        pcall(doAutoChest)
+        pcall(doAutoSack)
+        pcall(doAutoRepair)
+        pcall(doAutoFish)
+        pcall(doAutoHarpoon)
+        pcall(updateItemESP)
+        pcall(doServerInfo)
     end
 end)
 
-print("[100 Days at Sea Hub] Loaded.")
+print("[100 Days at Sea Hub] Loaded successfully.")
 setStatus("Loaded. All features ready.")
