@@ -319,25 +319,25 @@ end
 local function openLeftDoor()
     leftDoorOpen = true
     setDoorTarget(leftDoorSlots, DOOR_OPEN_LEFT)
-    print("[Lambo] Left door opening 🔓")
+    print("[Lambo] Left door opening ")
 end
 
 local function closeLeftDoor()
     leftDoorOpen = false
     setDoorTarget(leftDoorSlots, DOOR_CLOSED)
-    print("[Lambo] Left door closing 🔒")
+    print("[Lambo] Left door closing ")
 end
 
 local function openRightDoor()
     rightDoorOpen = true
     setDoorTarget(rightDoorSlots, DOOR_OPEN_RIGHT)
-    print("[Lambo] Right door opening 🔓")
+    print("[Lambo] Right door opening ")
 end
 
 local function closeRightDoor()
     rightDoorOpen = false
     setDoorTarget(rightDoorSlots, DOOR_CLOSED)
-    print("[Lambo] Right door closing 🔒")
+    print("[Lambo] Right door closing ")
 end
 
 -- ============================================================
@@ -794,7 +794,7 @@ local function createGUI()
     stateLbl.Size              = UDim2.new(1, -12, 0, 14)
     stateLbl.Position          = UDim2.fromOffset(8, 101)
     stateLbl.BackgroundTransparency = 1
-    stateLbl.Text              = "DOORS  L:🔒  R:🔒   |   SEAT: —"
+    stateLbl.Text              = "DOORS  L:  R:   |   SEAT: —"
     stateLbl.TextColor3        = Color3.fromRGB(75, 75, 85)
     stateLbl.TextSize          = 7
     stateLbl.Font              = Enum.Font.Gotham
@@ -804,7 +804,7 @@ local function createGUI()
     task.spawn(function()
         while gui.Parent and scriptAlive do
             -- Status
-            statusLbl.Text       = isActive and "STATUS: 🟡 ACTIVE" or "STATUS: ⬛ IDLE"
+            statusLbl.Text       = isActive and "STATUS:  ACTIVE" or "STATUS:  IDLE"
             statusLbl.TextColor3 = isActive and LAMBO_YELLOW or Color3.fromRGB(70, 70, 80)
 
             -- Block counter + progress bar
@@ -818,9 +818,9 @@ local function createGUI()
                 and Color3.fromRGB(80, 255, 110) or LAMBO_YELLOW
 
             -- Door + seat state
-            local lStr = leftDoorOpen  and "🔓" or "🔒"
-            local rStr = rightDoorOpen and "🔓" or "🔒"
-            local sStr = isSitting     and "🪑 IN" or "—"
+            local lStr = leftDoorOpen  and "" or ""
+            local rStr = rightDoorOpen and "" or ""
+            local sStr = isSitting     and " IN" or "—"
             stateLbl.Text = "DOORS  L:" .. lStr .. "  R:" .. rStr .. "   |   SEAT: " .. sStr
 
             task.wait(0.4)
@@ -848,10 +848,10 @@ local function createGUI()
     end
 
     -- ── Section: Core ──
-    makeBtn("🔍  SCAN BLOCKS",              Color3.fromRGB(16, 40, 16),  Color3.fromRGB(80, 255, 100), sweepMap)
-    makeBtn("▶  ACTIVATE  ( !lambo )",      Color3.fromRGB(50, 38, 0),   LAMBO_YELLOW,               activateLambo)
-    makeBtn("⏹  DEACTIVATE",               Color3.fromRGB(50, 10, 10),  Color3.fromRGB(255, 70, 70), deactivateLambo)
-    makeBtn("🔄  RESCAN + RECOLOR",         Color3.fromRGB(10, 20, 40),  Color3.fromRGB(80, 160, 255), function()
+    makeBtn("  SCAN BLOCKS",              Color3.fromRGB(16, 40, 16),  Color3.fromRGB(80, 255, 100), sweepMap)
+    makeBtn("  ACTIVATE  ( !lambo )",      Color3.fromRGB(50, 38, 0),   LAMBO_YELLOW,               activateLambo)
+    makeBtn("  DEACTIVATE",               Color3.fromRGB(50, 10, 10),  Color3.fromRGB(255, 70, 70), deactivateLambo)
+    makeBtn("  RESCAN + RECOLOR",         Color3.fromRGB(10, 20, 40),  Color3.fromRGB(80, 160, 255), function()
         sweepMap()
         local pl = {}
         for part, _ in pairs(controlled) do table.insert(pl, part) end
@@ -861,18 +861,18 @@ local function createGUI()
     btnY = btnY + 4; makeDivider(btnY); btnY = btnY + 8
 
     -- ── Section: Doors ──
-    makeBtn("🚪  OPEN BOTH DOORS   (?open)",  Color3.fromRGB(12, 28, 48), Color3.fromRGB(110, 195, 255), function()
+    makeBtn("  OPEN BOTH DOORS   (?open)",  Color3.fromRGB(12, 28, 48), Color3.fromRGB(110, 195, 255), function()
         if isActive then openLeftDoor(); openRightDoor() end
     end)
-    makeBtn("🔒  CLOSE BOTH DOORS  (?close)", Color3.fromRGB(12, 28, 48), Color3.fromRGB(110, 195, 255), function()
+    makeBtn("  CLOSE BOTH DOORS  (?close)", Color3.fromRGB(12, 28, 48), Color3.fromRGB(110, 195, 255), function()
         if isActive then closeLeftDoor(); closeRightDoor() end
     end)
-    makeBtn("◀  LEFT DOOR TOGGLE   (?left)", Color3.fromRGB(18, 18, 45), Color3.fromRGB(155, 155, 255), function()
+    makeBtn("  LEFT DOOR TOGGLE   (?left)", Color3.fromRGB(18, 18, 45), Color3.fromRGB(155, 155, 255), function()
         if isActive then
             if leftDoorOpen then closeLeftDoor() else openLeftDoor() end
         end
     end)
-    makeBtn("▶  RIGHT DOOR TOGGLE  (?right)",Color3.fromRGB(18, 18, 45), Color3.fromRGB(155, 155, 255), function()
+    makeBtn("  RIGHT DOOR TOGGLE  (?right)",Color3.fromRGB(18, 18, 45), Color3.fromRGB(155, 155, 255), function()
         if isActive then
             if rightDoorOpen then closeRightDoor() else openRightDoor() end
         end
@@ -893,7 +893,7 @@ local function createGUI()
     cmdTitle.Size              = UDim2.new(1, -12, 0, 14)
     cmdTitle.Position          = UDim2.fromOffset(8, btnY)
     cmdTitle.BackgroundTransparency = 1
-    cmdTitle.Text              = "📋  CHAT COMMANDS"
+    cmdTitle.Text              = "  CHAT COMMANDS"
     cmdTitle.TextColor3        = Color3.fromRGB(150, 150, 165)
     cmdTitle.TextSize          = 7
     cmdTitle.Font              = Enum.Font.GothamBold
@@ -1004,5 +1004,5 @@ player.CharacterAdded:Connect(function()
     if isActive then sweepMap() end
 end)
 
-print("[LamboScript] ✅ Ready!  Type  !lambo  in chat to build the car.")
+print("[LamboScript]  Ready!  Type  !lambo  in chat to build the car.")
 print("[LamboScript] GUI panel on the left — drag it anywhere you like.")
