@@ -613,7 +613,7 @@ local function activateLambo()
     local pl = {}
     for part, _ in pairs(controlled) do table.insert(pl, part) end
     applyLamboColors(pl)
-    print("[Lambo] 🚗 Lambo activated! " .. partCount .. " blocks grabbed.")
+    print("[Lambo]  Lambo activated! " .. partCount .. " blocks grabbed.")
 end
 
 local function deactivateLambo()
@@ -695,7 +695,7 @@ local function createGUI()
     title.Size              = UDim2.new(1, -44, 0, 26)
     title.Position          = UDim2.fromOffset(8, 7)
     title.BackgroundTransparency = 1
-    title.Text              = "🚗  LAMBORGHINI"
+    title.Text              = "  LAMBORGHINI"
     title.TextColor3        = LAMBO_YELLOW
     title.TextSize          = 12
     title.Font              = Enum.Font.GothamBold
@@ -881,10 +881,10 @@ local function createGUI()
     btnY = btnY + 4; makeDivider(btnY); btnY = btnY + 8
 
     -- ── Section: Seat ──
-    makeBtn("🪑  SIT IN CAR   (?sit)",       Color3.fromRGB(16, 40, 18), Color3.fromRGB(90, 255, 115), function()
+    makeBtn("  SIT IN CAR   (?sit)",       Color3.fromRGB(16, 40, 18), Color3.fromRGB(90, 255, 115), function()
         if isActive then sitInCar() end
     end)
-    makeBtn("🚶  EXIT CAR     (?unsit)",      Color3.fromRGB(40, 18, 18), Color3.fromRGB(255, 110, 90), unsitFromCar)
+    makeBtn("  EXIT CAR     (?unsit)",      Color3.fromRGB(40, 18, 18), Color3.fromRGB(255, 110, 90), unsitFromCar)
 
     btnY = btnY + 4; makeDivider(btnY); btnY = btnY + 8
 
