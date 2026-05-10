@@ -1,9 +1,10 @@
 -- ============================================================
--- LAMBORGHINI + SWORD FORMATION SCRIPT  v3
+-- LAMBORGHINI + SWORD FORMATION SCRIPT  v4
 -- Commands:
 --   !lambo               build + activate Lamborghini
 --   !stop                release all Lambo blocks
---   !sword               spawn 5 spinning swords around you
+--   !autograb            TP to every anchored block and grab it
+--   !sword               spawn 5 spinning swords around you (white)
 --   !swordstop           release sword blocks
 --   ?open                open both scissor doors
 --   ?left                open left door only
@@ -11,8 +12,8 @@
 --   ?close               close all doors
 --   ?sit                 enter driver seat (noclip on)
 --   ?unsit               exit car (noclip off)
---   ?hover               big sword under feet, fly mode on
---   ?land                land and disable fly mode
+--   ?hover               sword platform sits at your feet while you walk
+--   ?land                return swords to orbit
 --   ?attack <name> <1-5> fire swords at a player (partial name ok)
 --   .whitelist <name>    allow another player to use all commands
 -- ============================================================
@@ -37,11 +38,12 @@ local RED     = Color3.fromRGB(255,  30,  30)
 local ORANGE  = Color3.fromRGB(255, 100,   0)
 local GLASS   = Color3.fromRGB( 80, 140, 200)
 
--- Sword colors
-local SWORD_BLADE  = Color3.fromRGB(180, 210, 255)  -- icy steel blue
-local SWORD_GUARD  = Color3.fromRGB(210, 160,  30)  -- gold crossguard
-local SWORD_HANDLE = Color3.fromRGB( 90,  30,  10)  -- dark red leather wrap
-local SWORD_GEM    = Color3.fromRGB(120,  30, 255)  -- purple gem
+-- Sword color: plain white/off-white, no tinting
+local SWORD_WHITE = Color3.fromRGB(235, 235, 235)
+local SWORD_BLADE  = SWORD_WHITE
+local SWORD_GUARD  = SWORD_WHITE
+local SWORD_HANDLE = SWORD_WHITE
+local SWORD_GEM    = SWORD_WHITE
 
 -- ============================================================
 -- STATE
@@ -159,6 +161,66 @@ end
 
 local function releasePool(pool)
     for part, data in pairs(pool) do releaseFrom(pool, part, data) end
+end
+
+-- ============================================================
+-- AUTO-GRAB: teleport to every anchored block and grab it
+-- ============================================================
+local autoGrabRunning = false
+
+local function autoGrabAll()
+    if autoGrabRunning then return end
+    autoGrabRunning = true
+
+    local char = player.Character
+    if not char then autoGrabRunning = false; return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then autoGrabRunning = false; return end
+
+    -- Store original position to come back after
+    local origCF = hrp.CFrame
+
+    -- Collect ALL anchored BaseParts in workspace first
+    local anchored = {}
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart")
+           and obj.Anchored == true
+           and obj.Transparency < 1
+           and obj.Size.Magnitude >= 0.2
+           and obj.Name ~= "Baseplate"
+           and not lamboControlled[obj]
+           and not swordControlled[obj] then
+            local isChar = false
+            local p = obj.Parent
+            while p and p ~= workspace do
+                if p:FindFirstChildOfClass("Humanoid") then isChar = true; break end
+                p = p.Parent
+            end
+            if not isChar then table.insert(anchored, obj) end
+        end
+    end
+
+    -- Teleport to each block, grab it, brief yield so network catches up
+    local grabbed = 0
+    for _, part in ipairs(anchored) do
+        if part and part.Parent then
+            -- Teleport player right on top of the block
+            local tp = part.Position + Vector3.new(0, part.Size.Y/2 + 3, 0)
+            pcall(function() hrp.CFrame = CFrame.new(tp) end)
+            task.wait(0.05)  -- tiny yield — just enough for network ownership claim
+            grabInto(lamboControlled, part)
+            grabbed = grabbed + 1
+        end
+    end
+
+    -- Teleport back to start
+    pcall(function() hrp.CFrame = origCF end)
+
+    lamboPartCount = 0
+    for _ in pairs(lamboControlled) do lamboPartCount = lamboPartCount + 1 end
+
+    print("[AutoGrab] Grabbed " .. grabbed .. " anchored blocks.")
+    autoGrabRunning = false
 end
 
 -- Sweep map into a pool, stop after maxCount parts
@@ -533,12 +595,12 @@ local SWORD_BLOCK_COLORS = {
     SWORD_BLADE,  SWORD_BLADE, SWORD_BLADE, SWORD_BLADE, SWORD_BLADE,
 }
 local SWORD_BLOCK_MATS = {
-    Enum.Material.Wood,         Enum.Material.Wood,
-    Enum.Material.Metal,        Enum.Material.Metal,
-    Enum.Material.Neon,
-    Enum.Material.Metal,        Enum.Material.Metal,
-    Enum.Material.Metal,        Enum.Material.Metal,
-    Enum.Material.Metal,
+    Enum.Material.SmoothPlastic, Enum.Material.SmoothPlastic,
+    Enum.Material.SmoothPlastic, Enum.Material.SmoothPlastic,
+    Enum.Material.SmoothPlastic,
+    Enum.Material.SmoothPlastic, Enum.Material.SmoothPlastic,
+    Enum.Material.SmoothPlastic, Enum.Material.SmoothPlastic,
+    Enum.Material.SmoothPlastic,
 }
 
 local SWORD_LAYOUT    = buildSwordLayout()
@@ -666,103 +728,45 @@ local function deactivateSwords()
 end
 
 -- ============================================================
--- ====================  HOVER / FLY  =========================
+-- ====================  HOVER  ===============================
 -- ============================================================
--- ?hover: swords collapse to your feet as a platform, fly enabled
--- Movement: WASD = fly direction, Space = up, Shift = down
--- Speed: 35 studs/s base (well above the 16 cap)
-
-local FLY_SPEED    = 35  -- studs per second
-local FLY_SPEED_UP = 20
+-- ?hover: swords gather flat under your feet and stay there
+-- as you walk. No flying. Just sword platform at feet.
+-- ?land: swords return to normal orbit.
 
 local function doHover()
     if not swordActive then
-        -- Auto-activate swords if not already up
         activateSwords()
         task.wait(0.5)
     end
 
-    local char = player.Character; if not char then return end
-    local hrp  = char:FindFirstChild("HumanoidRootPart"); if not hrp then return end
-    local hum  = char:FindFirstChildOfClass("Humanoid");  if not hum then return end
-
     hoverActive = true
-
-    -- Disable humanoid walking physics, enable fly
-    hum.PlatformStand = true
-    setCharNoclip(true)
-
-    -- Add BodyVelocity to HRP
-    local bv = hrp:FindFirstChildOfClass("BodyVelocity")
-    if not bv then
-        bv = Instance.new("BodyVelocity")
-        bv.MaxForce = Vector3.new(1e9, 1e9, 1e9)
-        bv.Velocity = Vector3.zero
-        bv.P = 1e4
-        bv.Parent = hrp
-    end
-
-    -- BodyGyro to keep player upright
-    local bg2 = hrp:FindFirstChildOfClass("BodyGyro")
-    if not bg2 then
-        bg2 = Instance.new("BodyGyro")
-        bg2.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
-        bg2.P = 1e4; bg2.D = 500
-        bg2.CFrame = hrp.CFrame
-        bg2.Parent = hrp
-    end
 
     if hoverHeart then hoverHeart:Disconnect() end
     hoverHeart = RunService.Heartbeat:Connect(function()
         if not hoverActive or not scriptAlive then return end
-        local c = player.Character; if not c then return end
-        local h = c:FindFirstChild("HumanoidRootPart"); if not h then return end
+        local char = player.Character; if not char then return end
+        local hrp  = char:FindFirstChild("HumanoidRootPart"); if not hrp then return end
 
-        -- Read directional keys
-        local vx, vy, vz = 0, 0, 0
-        local cf     = h.CFrame
-        local look   = cf.LookVector
-        local right  = cf.RightVector
-
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then
-            vx = vx + look.X * FLY_SPEED
-            vz = vz + look.Z * FLY_SPEED
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then
-            vx = vx - look.X * FLY_SPEED
-            vz = vz - look.Z * FLY_SPEED
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then
-            vx = vx - right.X * FLY_SPEED
-            vz = vz - right.Z * FLY_SPEED
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then
-            vx = vx + right.X * FLY_SPEED
-            vz = vz + right.Z * FLY_SPEED
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-            vy = FLY_SPEED_UP
-        elseif UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
-            vy = -FLY_SPEED_UP
-        end
-
-        local bvp = h:FindFirstChildOfClass("BodyVelocity")
-        if bvp then bvp.Velocity = Vector3.new(vx, vy, vz) end
-
-        -- Sword platform: collapse all swords into flat ring under feet
-        local pos = h.Position
+        local pos = hrp.Position
         local t   = tick()
+
+        -- Arrange all sword blocks in a flat ring directly under player feet
+        local total = #swordOrder
         for idx, part in ipairs(swordOrder) do
             local data = swordControlled[part]
             if data and data.bp and data.bp.Parent then
-                local a     = (idx / #swordOrder) * math.pi * 2 + t * 0.5
-                local radius = 3
+                -- Spread into a flat rosette under feet
+                local a      = (idx / total) * math.pi * 2 + t * 0.3
+                local ring   = 1 + (idx % 3) * 0.8  -- 3 rings of density
                 data.bp.Position = Vector3.new(
-                    pos.X + math.cos(a) * radius,
-                    pos.Y - 3,
-                    pos.Z + math.sin(a) * radius
+                    pos.X + math.cos(a) * ring,
+                    pos.Y - 3.2,          -- just below feet
+                    pos.Z + math.sin(a) * ring
                 )
-                data.bg.CFrame = CFrame.new(data.bp.Position) * CFrame.Angles(0, a, 0)
+                -- All blocks lay flat (face upward)
+                data.bg.CFrame = CFrame.new(data.bp.Position)
+                    * CFrame.Angles(0, a, 0)
             end
         end
     end)
@@ -771,24 +775,9 @@ end
 local function doLand()
     hoverActive = false
     if hoverHeart then hoverHeart:Disconnect(); hoverHeart=nil end
-
-    local char = player.Character
-    if char then
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            local bv = hrp:FindFirstChildOfClass("BodyVelocity")
-            if bv then bv:Destroy() end
-            local bg2 = hrp:FindFirstChildOfClass("BodyGyro")
-            if bg2 then bg2:Destroy() end
-        end
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum then hum.PlatformStand = false end
-        setCharNoclip(false)
-    end
     -- Resume normal sword orbit
-    if swordActive and swordHeart then swordHeart:Disconnect(); swordHeart = nil end
     if swordActive then
-        -- Restart orbit loop
+        if swordHeart then swordHeart:Disconnect(); swordHeart=nil end
         activateSwords()
     end
 end
@@ -880,6 +869,9 @@ local function handleCommand(raw, sender)
     -- LAMBO
     if cmd == "!lambo" then
         if not lamboActive then activateLambo() end
+
+    elseif cmd == "!autograb" then
+        task.spawn(autoGrabAll)
 
     elseif cmd == "!stop" then
         deactivateLambo()
@@ -1140,6 +1132,9 @@ local function createGUI()
     -- LAMBO section
     sectionHead("-- LAMBO --")
     makeBtn("SCAN BLOCKS",   Color3.fromRGB(12,30,12), Color3.fromRGB(80,255,100), function() sweepInto(lamboControlled,nil) end)
+    makeBtn("AUTO-GRAB ALL ANCHORED", Color3.fromRGB(8,28,40), Color3.fromRGB(80,220,255), function()
+        task.spawn(autoGrabAll)
+    end)
     makeBtn("ACTIVATE LAMBO",Color3.fromRGB(50,38,0),  YELLOW, function()
         if not lamboActive then activateLambo() end
     end)
@@ -1191,13 +1186,14 @@ local function createGUI()
     local cmdList = {
         {"!lambo",              "Build + activate Lambo"},
         {"!stop",               "Release Lambo blocks"},
+        {"!autograb",           "TP to every anchored block + grab"},
         {"!sword",              "Spin 5 swords around you"},
         {"!swordstop",          "Release sword blocks"},
         {"?open / ?left / ?right","Open scissor doors"},
         {"?close",              "Close doors"},
         {"?sit / ?unsit",       "Enter / exit car"},
-        {"?hover",              "Fly on sword platform"},
-        {"?land",               "Land + stop flying"},
+        {"?hover",              "Sword platform at your feet"},
+        {"?land",               "Return swords to orbit"},
         {"?attack <name> <1-5>","Fire swords at player"},
         {".whitelist <name>",   "Allow player to use cmds"},
     }
