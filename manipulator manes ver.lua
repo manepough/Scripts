@@ -164,63 +164,105 @@ local function releasePool(pool)
 end
 
 -- ============================================================
--- AUTO-GRAB: teleport to every anchored block and grab it
+-- PROXIMITY GRAB  (replaces autoGrab)
+-- Walks the workspace every 0.1s and grabs any anchored block
+-- within PROX_RADIUS studs of the player.
+-- A separate sticky loop runs every frame to re-enforce
+-- Anchored=false + re-claim ownership so the server can't
+-- take blocks back.
 -- ============================================================
-local autoGrabRunning = false
+local PROX_RADIUS    = 20   -- studs — grab range
+local proxGrabActive = false
+local proxGrabConn   = nil
+local stickyConn     = nil
 
-local function autoGrabAll()
-    if autoGrabRunning then return end
-    autoGrabRunning = true
+-- Fast helper: is part a valid candidate?
+local function isValidAnchoredBlock(obj)
+    if not obj or not obj.Parent           then return false end
+    if not obj:IsA("BasePart")             then return false end
+    if not obj.Anchored                    then return false end  -- only anchored
+    if obj.Transparency >= 1               then return false end
+    if obj.Size.Magnitude < 0.2            then return false end
+    if obj.Name == "Baseplate"             then return false end
+    if lamboControlled[obj]                then return false end  -- already grabbed
+    if swordControlled[obj]               then return false end
+    local p = obj.Parent
+    while p and p ~= workspace do
+        if p:FindFirstChildOfClass("Humanoid") then return false end
+        p = p.Parent
+    end
+    return true
+end
 
-    local char = player.Character
-    if not char then autoGrabRunning = false; return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then autoGrabRunning = false; return end
+local function startProxGrab()
+    if proxGrabActive then return end
+    proxGrabActive = true
 
-    -- Store original position to come back after
-    local origCF = hrp.CFrame
-
-    -- Collect ALL anchored BaseParts in workspace first
-    local anchored = {}
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart")
-           and obj.Anchored == true
-           and obj.Transparency < 1
-           and obj.Size.Magnitude >= 0.2
-           and obj.Name ~= "Baseplate"
-           and not lamboControlled[obj]
-           and not swordControlled[obj] then
-            local isChar = false
-            local p = obj.Parent
-            while p and p ~= workspace do
-                if p:FindFirstChildOfClass("Humanoid") then isChar = true; break end
-                p = p.Parent
+    -- ── PROXIMITY SCAN  every 0.1 s ──────────────────────
+    proxGrabConn = task.spawn(function()
+        while proxGrabActive and scriptAlive do
+            local char = player.Character
+            local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local pos = hrp.Position
+                for _, obj in ipairs(workspace:GetDescendants()) do
+                    if isValidAnchoredBlock(obj) then
+                        local dist = (obj.Position - pos).Magnitude
+                        if dist <= PROX_RADIUS then
+                            grabInto(lamboControlled, obj)
+                        end
+                    end
+                end
+                -- Keep count fresh
+                lamboPartCount = 0
+                for _ in pairs(lamboControlled) do lamboPartCount = lamboPartCount + 1 end
             end
-            if not isChar then table.insert(anchored, obj) end
+            task.wait(0.1)
         end
-    end
+    end)
 
-    -- Teleport to each block, grab it, brief yield so network catches up
-    local grabbed = 0
-    for _, part in ipairs(anchored) do
-        if part and part.Parent then
-            -- Teleport player right on top of the block
-            local tp = part.Position + Vector3.new(0, part.Size.Y/2 + 3, 0)
-            pcall(function() hrp.CFrame = CFrame.new(tp) end)
-            task.wait(0.05)  -- tiny yield — just enough for network ownership claim
-            grabInto(lamboControlled, part)
-            grabbed = grabbed + 1
+    -- ── STICKY ENFORCER  every frame ─────────────────────
+    -- Re-applies Anchored=false + SetNetworkOwner every Heartbeat
+    -- so the server can never win the tug-of-war.
+    -- Also re-creates BodyPosition/BodyGyro if they got destroyed.
+    if stickyConn then stickyConn:Disconnect() end
+    stickyConn = RunService.Heartbeat:Connect(function()
+        if not proxGrabActive then return end
+        for part, data in pairs(lamboControlled) do
+            if part and part.Parent then
+                -- Re-enforce unanchored + no collide
+                if part.Anchored then
+                    pcall(function() part.Anchored   = false end)
+                    pcall(function() part.CanCollide = false end)
+                    pcall(function() part:SetNetworkOwner(player) end)
+                end
+                -- Re-create BodyPosition if it disappeared
+                if not data.bp or not data.bp.Parent then
+                    local bp = Instance.new("BodyPosition")
+                    bp.MaxForce = Vector3.new(1e9,1e9,1e9)
+                    bp.P=300000; bp.D=8000
+                    bp.Position = part.Position
+                    bp.Parent   = part
+                    data.bp = bp
+                end
+                -- Re-create BodyGyro if it disappeared
+                if not data.bg or not data.bg.Parent then
+                    local bg = Instance.new("BodyGyro")
+                    bg.MaxTorque = Vector3.new(1e9,1e9,1e9)
+                    bg.P=300000; bg.D=8000
+                    bg.CFrame = part.CFrame
+                    bg.Parent = part
+                    data.bg = bg
+                end
+            end
         end
-    end
+    end)
+end
 
-    -- Teleport back to start
-    pcall(function() hrp.CFrame = origCF end)
-
-    lamboPartCount = 0
-    for _ in pairs(lamboControlled) do lamboPartCount = lamboPartCount + 1 end
-
-    print("[AutoGrab] Grabbed " .. grabbed .. " anchored blocks.")
-    autoGrabRunning = false
+local function stopProxGrab()
+    proxGrabActive = false
+    if stickyConn then stickyConn:Disconnect(); stickyConn=nil end
+    -- proxGrabConn is a task.spawn, it exits on proxGrabActive=false naturally
 end
 
 -- Sweep map into a pool, stop after maxCount parts
@@ -538,6 +580,7 @@ local function activateLambo()
     lamboPartCount = 0
     for _ in pairs(lamboControlled) do lamboPartCount = lamboPartCount + 1 end
     lamboActive = true
+    startProxGrab()       -- start proximity grab + sticky enforcer
     startLamboFormation()
     task.wait(0.5)
     applyLamboColors()
@@ -545,6 +588,7 @@ end
 
 local function deactivateLambo()
     lamboActive = false
+    stopProxGrab()
     if isSeated then doUnsit() end
     if lamboHeart then lamboHeart:Disconnect(); lamboHeart=nil end
     releasePool(lamboControlled)
@@ -870,9 +914,6 @@ local function handleCommand(raw, sender)
     if cmd == "!lambo" then
         if not lamboActive then activateLambo() end
 
-    elseif cmd == "!autograb" then
-        task.spawn(autoGrabAll)
-
     elseif cmd == "!stop" then
         deactivateLambo()
 
@@ -1132,9 +1173,6 @@ local function createGUI()
     -- LAMBO section
     sectionHead("-- LAMBO --")
     makeBtn("SCAN BLOCKS",   Color3.fromRGB(12,30,12), Color3.fromRGB(80,255,100), function() sweepInto(lamboControlled,nil) end)
-    makeBtn("AUTO-GRAB ALL ANCHORED", Color3.fromRGB(8,28,40), Color3.fromRGB(80,220,255), function()
-        task.spawn(autoGrabAll)
-    end)
     makeBtn("ACTIVATE LAMBO",Color3.fromRGB(50,38,0),  YELLOW, function()
         if not lamboActive then activateLambo() end
     end)
@@ -1185,8 +1223,9 @@ local function createGUI()
 
     local cmdList = {
         {"!lambo",              "Build + activate Lambo"},
+        {"",                    "  (auto-grabs nearby anchored"},
+        {"",                    "   blocks as you walk)"},
         {"!stop",               "Release Lambo blocks"},
-        {"!autograb",           "TP to every anchored block + grab"},
         {"!sword",              "Spin 5 swords around you"},
         {"!swordstop",          "Release sword blocks"},
         {"?open / ?left / ?right","Open scissor doors"},
@@ -1307,17 +1346,8 @@ print("[Script v3] Commands: !lambo | !stop | !sword | !swordstop | ?hover | ?la
 
 createGUI()
 
--- Periodic rescan
-task.spawn(function()
-    while scriptAlive do
-        task.wait(5)
-        if lamboActive then
-            sweepInto(lamboControlled, nil)
-            lamboPartCount = 0
-            for _ in pairs(lamboControlled) do lamboPartCount=lamboPartCount+1 end
-        end
-    end
-end)
+-- Proximity grab starts automatically when !lambo is used.
+-- No manual periodic rescan needed — proxGrab runs every 0.1s.
 
 -- Reset on respawn
 player.CharacterAdded:Connect(function()
