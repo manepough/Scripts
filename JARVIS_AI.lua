@@ -166,17 +166,31 @@ local function detectReq()
     print("[JARVIS] HTTP: no preferred fn found, using fallback.")
 end
 task.spawn(detectReq)
+-- Wait for HTTP detection before anything tries to use it
+task.defer(function() local t=0 while not reqFn and t<5 do task.wait(0.1); t=t+0.1 end end)
 
 -- HDR is now built dynamically per request using getKey()
 local function buildHDR() return { ["Content-Type"]="application/json", ["Authorization"]="Bearer "..getKey() } end
 local GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 local function doReq(url, method, body)
-    if not reqFn then return nil end
+    -- Wait up to 3s for HTTP function detection if not ready yet
+    local waited = 0
+    while not reqFn and waited < 3 do
+        task.wait(0.1); waited = waited + 0.1
+    end
+    if not reqFn then
+        print("[JARVIS] doReq: no HTTP function available")
+        return nil
+    end
     local opts = { Url=url, Method=method or "GET", Headers=buildHDR() }
     if body then opts.Body = body end
     local ok, r = pcall(reqFn, opts)
-    return (ok and r and r.StatusCode) and r or nil
+    if not ok then
+        print("[JARVIS] doReq pcall error: " .. tostring(r))
+        return nil
+    end
+    return (r and r.StatusCode) and r or nil
 end
 
 -- --- GROQ API ---
@@ -190,6 +204,11 @@ local function groqCall(model, msgs, maxTok, temp)
     })
     if not ok then return nil end
 
+    if #KeyPool == 0 then
+        print("[JARVIS] groqCall: no keys loaded!")
+        return nil
+    end
+    print("[JARVIS] groqCall: model=" .. model .. " keys=" .. #KeyPool .. " currentKey=" .. KeyIndex)
     -- Try every key in the pool before giving up on this model
     local attempts = math.max(1, #KeyPool)
     for attempt = 1, attempts do
