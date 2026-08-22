@@ -89,6 +89,10 @@ local State = {
 -- ScriptConns: user-toggled script connections (esp, killaura, etc.)
 local Conns      = {}
 local ScriptConns= {}
+local ChatCooldowns  = {}  -- per-player chat cooldown
+local CHAT_COOLDOWN  = 8
+local ChatConvHist   = {}
+local ChatEnabled    = true
 local ChatHist   = {}
 local MsgCount   = 0
 local RSpyLog    = {}
@@ -1936,16 +1940,16 @@ local function startClickInspect()
             if result and result.Instance then
                 local inst = result.Instance
                 -- Show properties in DEX
-                openDexWith(inst)
+                pcall(function() openDexWith(inst) end)
                 -- Also show full property dump in chat
-                local info = Scanner.inspect(inst)
-                addMsg("DEX ["..inst.ClassName.."]", info, false)
+                pcall(function()
+                    local info = Scanner.inspect(inst)
+                    addMsg("DEX ["..inst.ClassName.."]", info, false)
+                end)
             end
         end)
     end)
 end
-startClickInspect()
-
 -- SPY button (left)
 local SpyBtn=Instance.new("TextButton",SG)
 SpyBtn.Size=UDim2.new(0,42,0,42); SpyBtn.AnchorPoint=Vector2.new(0,1)
@@ -2227,10 +2231,7 @@ end
 -- Chat conversation system
 -- JARVIS talks to other players like a normal person
 -- Also listens for owner commands from chat
-local ChatCooldowns  = {}  -- [playerName] = last reply time
-local CHAT_COOLDOWN  = 8   -- seconds between replies to same person
-local ChatConvHist   = {}  -- separate short history for chat convos
-local ChatEnabled    = true -- owner can toggle this
+-- (ChatEnabled/ChatCooldowns/ChatConvHist declared at top)
 
 local SYS_CHAT = table.concat({
     "You are "..tostring(LP.DisplayName)..", a Roblox player having a normal conversation.",
@@ -2560,6 +2561,7 @@ local function buildSidePanels()
 end
 
 buildSidePanels()
+startClickInspect()  -- now safe: addMsg and openDexWith are defined
 
 -- --- RESPAWN HANDLER ---
 LP.CharacterAdded:Connect(function()
