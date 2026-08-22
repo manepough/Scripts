@@ -5,7 +5,7 @@
 -- ------------------------------------------------------------
 -- CONFIG - put your Gemini API key here
 -- ------------------------------------------------------------
-local YOUR_GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+local GEMINI_API_KEY = "AQ.Ab8RN6J1xVnvGacTRL73nXHnwK7qrU9pBZgrkl0DHTDfrl-Pug"
 -- ------------------------------------------------------------
 
 -- Gemini model to use (free tier)
