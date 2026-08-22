@@ -1,26 +1,66 @@
 -- ============================================================
---   J.A.R.V.I.S v10.3 | Gemini Build
+--   J.A.R.V.I.S v10.3 | Groq Build
 --   Scanner + rSpy + Dex Explorer | Delta / Mobile
 -- ============================================================
 -- ------------------------------------------------------------
 -- CONFIG - put your Gemini API key here
 -- ------------------------------------------------------------
--- Read key from Delta workspace file: put your key in a file called "jarvis.env" in Delta's workspace folder
-local YOUR_GEMINI_API_KEY = ""
+-- Load Groq API keys from Delta workspace file: jarvis.env
+-- Put one key per line, up to 50 keys. Lines starting with # are ignored.
+-- Example jarvis.env:
+--   gsk_abc123...
+--   gsk_def456...
+local KeyPool      = {}
+local KeyIndex     = 1
+local KeyFails     = {}
+local KEY_MAX_FAIL = 3
+
 pcall(function()
     local raw = readfile("jarvis.env")
-    YOUR_GEMINI_API_KEY = raw:match("^%s*(.-)%s*$") or ""
+    for line in raw:gmatch("[^\r\n]+") do
+        line = line:match("^%s*(.-)%s*$")
+        if line ~= "" and not line:match("^#") then
+            table.insert(KeyPool, line)
+            KeyFails[#KeyPool] = 0
+        end
+    end
 end)
-if YOUR_GEMINI_API_KEY == "" then
-    warn("[JARVIS] No API key found. Create jarvis.env in Delta workspace with your Gemini key.")
+
+if #KeyPool == 0 then
+    warn("[JARVIS] No API keys found. Add Groq keys (one per line) to jarvis.env in Delta workspace.")
 else
-    print("[JARVIS] API key loaded OK - length: " .. #YOUR_GEMINI_API_KEY)
+    print("[JARVIS] Loaded " .. #KeyPool .. " Groq key(s).")
+end
+
+local function getKey()
+    if #KeyPool == 0 then return "" end
+    for _ = 1, #KeyPool do
+        if (KeyFails[KeyIndex] or 0) < KEY_MAX_FAIL then
+            return KeyPool[KeyIndex]
+        end
+        KeyIndex = (KeyIndex % #KeyPool) + 1
+    end
+    -- All keys hit max fails, reset
+    print("[JARVIS] All keys exhausted, resetting fail counts.")
+    for i = 1, #KeyPool do KeyFails[i] = 0 end
+    KeyIndex = 1
+    return KeyPool[1]
+end
+
+local function rotateKey(failed)
+    if failed and #KeyPool > 0 then
+        KeyFails[KeyIndex] = (KeyFails[KeyIndex] or 0) + 1
+        print("[JARVIS] Key " .. KeyIndex .. " failed (" .. KeyFails[KeyIndex] .. "/" .. KEY_MAX_FAIL .. ")")
+    end
+    if #KeyPool > 1 then
+        KeyIndex = (KeyIndex % #KeyPool) + 1
+    end
 end
 -- ------------------------------------------------------------
 
 -- Gemini model to use (free tier)
-local MDL_CHAT  = "gemini-2.0-flash"
-local MDL_CODE  = "gemini-2.0-flash"
+local MDL_CHAT  = "llama-3.3-70b-versatile"
+local MDL_CODE  = "compound-beta"
 local FLY_SPEED = 50
 local HIST_MAX  = 12
 
@@ -106,7 +146,7 @@ local function detectReq()
         function(o) return HttpSvc:RequestAsync(o) end,
     }
     -- Send a cheap probe to Gemini to detect a working HTTP function
-    local probe = { Url="https://generativelanguage.googleapis.com", Method="GET", Headers={} }
+    local probe = { Url="https://api.groq.com", Method="GET", Headers={} }
     for _, fn in ipairs(candidates) do
         local ok, res = pcall(fn, probe)
         if ok and res and type(res.StatusCode)=="number" then
@@ -127,99 +167,68 @@ local function detectReq()
 end
 task.spawn(detectReq)
 
-local HDR = { ["Content-Type"]="application/json", ["x-goog-api-key"]=YOUR_GEMINI_API_KEY }
-local GEMINI_URL_BASE = "https://generativelanguage.googleapis.com/v1beta/models/"
+-- HDR is now built dynamically per request using getKey()
+local function buildHDR() return { ["Content-Type"]="application/json", ["Authorization"]="Bearer "..getKey() } end
+local GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 local function doReq(url, method, body)
     if not reqFn then return nil end
-    local opts = { Url=url, Method=method or "GET", Headers=HDR }
+    local opts = { Url=url, Method=method or "GET", Headers=buildHDR() }
     if body then opts.Body = body end
     local ok, r = pcall(reqFn, opts)
     return (ok and r and r.StatusCode) and r or nil
 end
 
--- --- GEMINI API ---
-local CHAT_MODELS = { MDL_CHAT, "gemini-1.5-flash", "gemini-1.5-flash-8b" }
-local CODE_MODELS = { MDL_CODE, MDL_CHAT, "gemini-1.5-flash" }
+-- --- GROQ API ---
+local CHAT_MODELS = { MDL_CHAT, "llama-3.1-8b-instant", "gemma2-9b-it" }
+local CODE_MODELS = { MDL_CODE, MDL_CHAT, "llama-3.1-8b-instant" }
 
--- Convert OpenAI-style messages to Gemini format
-local function toGeminiContents(msgs)
-    -- Extract system prompt and merge into first user message
-    local sysText = ""
-    local rest = {}
-    for _, m in ipairs(msgs) do
-        if m.role == "system" then
-            sysText = m.content
-        else
-            table.insert(rest, m)
-        end
-    end
-    local contents = {}
-    for i, m in ipairs(rest) do
-        local role = m.role == "assistant" and "model" or "user"
-        local text = m.content
-        -- Prepend system prompt to the first user message
-        if i == 1 and role == "user" and sysText ~= "" then
-            text = "[SYSTEM INSTRUCTIONS]\n" .. sysText .. "\n[END SYSTEM]\n\n" .. text
-        end
-        -- Gemini requires alternating turns; skip consecutive same-role messages
-        if #contents == 0 or contents[#contents].role ~= role then
-            table.insert(contents, { role=role, parts={{ text=text }} })
-        else
-            -- Merge into previous turn
-            contents[#contents].parts[1].text = contents[#contents].parts[1].text .. "\n" .. text
-        end
-    end
-    -- Must start with user turn
-    if #contents == 0 or contents[1].role ~= "user" then
-        table.insert(contents, 1, { role="user", parts={{ text=sysText ~= "" and sysText or "Hello" }} })
-    end
-    return contents
-end
-
-local function geminiCall(model, msgs, maxTok, temp)
-    local contents = toGeminiContents(msgs)
-    local payload = {
-        contents = contents,
-        generationConfig = {
-            maxOutputTokens = maxTok or 1500,
-            temperature     = temp or 0.7,
-        },
-    }
-    local ok, body = pcall(HttpSvc.JSONEncode, HttpSvc, payload)
+local function groqCall(model, msgs, maxTok, temp)
+    local ok, body = pcall(HttpSvc.JSONEncode, HttpSvc, {
+        model=model, messages=msgs,
+        max_tokens=maxTok or 1500, temperature=temp or 0.7,
+    })
     if not ok then return nil end
-    local url = GEMINI_URL_BASE .. model .. ":generateContent"
-    local res = doReq(url, "POST", body)
-    if not res then
-        print("[JARVIS] Gemini: no response (HTTP function failed or blocked)")
-        return nil
-    end
-    if res.StatusCode ~= 200 then
-        print("[JARVIS] Gemini HTTP " .. tostring(res.StatusCode))
-        -- Print first 300 chars of error body so we can see what Gemini says
-        pcall(function() print("[JARVIS] Gemini error: " .. tostring(res.Body):sub(1,300)) end)
-        return nil
-    end
-    local ok2, data = pcall(HttpSvc.JSONDecode, HttpSvc, res.Body)
-    if not ok2 then
-        print("[JARVIS] Gemini: failed to decode response")
-        return nil
-    end
-    if data and data.candidates and data.candidates[1] then
-        local cand = data.candidates[1]
-        if cand.content and cand.content.parts and cand.content.parts[1] then
-            return cand.content.parts[1].text
-        else
-            print("[JARVIS] Gemini: candidate has no content parts - finishReason: " .. tostring(cand.finishReason))
+
+    -- Try every key in the pool before giving up on this model
+    local attempts = math.max(1, #KeyPool)
+    for attempt = 1, attempts do
+        local res = doReq(GROQ_URL, "POST", body)
+        if not res then
+            print("[JARVIS] Groq: no HTTP response")
+            rotateKey(true); break
         end
-    elseif data and data.error then
-        print("[JARVIS] Gemini API error: " .. tostring(data.error.message))
-    else
-        print("[JARVIS] Gemini: unexpected response shape")
-        pcall(function() print(tostring(res.Body):sub(1,300)) end)
+
+        if res.StatusCode == 200 then
+            local ok2, data = pcall(HttpSvc.JSONDecode, HttpSvc, res.Body)
+            if ok2 and data and data.choices and data.choices[1] then
+                rotateKey(false) -- success: still rotate so keys share load
+                return data.choices[1].message.content
+            end
+            rotateKey(true); break
+
+        elseif res.StatusCode == 429 then
+            -- Rate limited: rotate to next key and retry immediately
+            print("[JARVIS] Key " .. KeyIndex .. " rate limited, rotating...")
+            rotateKey(true)
+            task.wait(0.2)
+
+        elseif res.StatusCode == 401 or res.StatusCode == 403 then
+            -- Bad key: mark failed and rotate
+            print("[JARVIS] Key " .. KeyIndex .. " auth error " .. res.StatusCode)
+            rotateKey(true)
+            task.wait(0.1)
+
+        else
+            -- Other error (400, 500 etc): not key related
+            print("[JARVIS] Groq HTTP " .. res.StatusCode)
+            pcall(function() print("[JARVIS] " .. tostring(res.Body):sub(1,200)) end)
+            rotateKey(false); break
+        end
     end
     return nil
 end
+
 
 local function callChat(sys, user)
     table.insert(ChatHist, { role="user", content=user })
@@ -234,7 +243,7 @@ local function callChat(sys, user)
     for _, m in ipairs(ChatHist) do table.insert(msgs, m) end
     local reply
     for _, mdl in ipairs(CHAT_MODELS) do
-        reply = geminiCall(mdl, msgs, 1500, 0.75)
+        reply = groqCall(mdl, msgs, 1500, 0.75)
         if reply then break end
         task.wait(0.5)
     end
@@ -245,7 +254,7 @@ end
 local function callCode(sys, user, tokens)
     local msgs = {{ role="system", content=sys }, { role="user", content=user }}
     for _, mdl in ipairs(CODE_MODELS) do
-        local r = geminiCall(mdl, msgs, tokens or 600, 0.15)
+        local r = groqCall(mdl, msgs, tokens or 600, 0.15)
         if r then print("[JARVIS] code via "..mdl); return r end
         task.wait(0.5)
     end
