@@ -6,13 +6,15 @@
 -- CONFIG - put your Gemini API key here
 -- ------------------------------------------------------------
 -- Read key from Delta workspace file: put your key in a file called "jarvis.env" in Delta's workspace folder
-local API_KEY = ""
+local YOUR_GEMINI_API_KEY = ""
 pcall(function()
     local raw = readfile("jarvis.env")
-    API_KEY = raw:match("^%s*(.-)%s*$") or ""
+    YOUR_GEMINI_API_KEY = raw:match("^%s*(.-)%s*$") or ""
 end)
-if API_KEY == "" then
+if YOUR_GEMINI_API_KEY == "" then
     warn("[JARVIS] No API key found. Create jarvis.env in Delta workspace with your Gemini key.")
+else
+    print("[JARVIS] API key loaded OK - length: " .. #YOUR_GEMINI_API_KEY)
 end
 -- ------------------------------------------------------------
 
@@ -188,16 +190,33 @@ local function geminiCall(model, msgs, maxTok, temp)
     if not ok then return nil end
     local url = GEMINI_URL_BASE .. model .. ":generateContent"
     local res = doReq(url, "POST", body)
-    if not res or res.StatusCode ~= 200 then
-        print("[JARVIS] Gemini HTTP " .. tostring(res and res.StatusCode))
+    if not res then
+        print("[JARVIS] Gemini: no response (HTTP function failed or blocked)")
+        return nil
+    end
+    if res.StatusCode ~= 200 then
+        print("[JARVIS] Gemini HTTP " .. tostring(res.StatusCode))
+        -- Print first 300 chars of error body so we can see what Gemini says
+        pcall(function() print("[JARVIS] Gemini error: " .. tostring(res.Body):sub(1,300)) end)
         return nil
     end
     local ok2, data = pcall(HttpSvc.JSONDecode, HttpSvc, res.Body)
-    if ok2 and data and data.candidates and data.candidates[1] then
+    if not ok2 then
+        print("[JARVIS] Gemini: failed to decode response")
+        return nil
+    end
+    if data and data.candidates and data.candidates[1] then
         local cand = data.candidates[1]
         if cand.content and cand.content.parts and cand.content.parts[1] then
             return cand.content.parts[1].text
+        else
+            print("[JARVIS] Gemini: candidate has no content parts - finishReason: " .. tostring(cand.finishReason))
         end
+    elseif data and data.error then
+        print("[JARVIS] Gemini API error: " .. tostring(data.error.message))
+    else
+        print("[JARVIS] Gemini: unexpected response shape")
+        pcall(function() print(tostring(res.Body):sub(1,300)) end)
     end
     return nil
 end
