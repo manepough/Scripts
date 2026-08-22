@@ -1,5 +1,5 @@
 -- ============================================================
---   J.A.R.V.I.S v10.4 | Groq Build
+--   J.A.R.V.I.S v10.6 | Groq Build
 --   Scanner + rSpy + Dex Explorer | Delta / Mobile
 -- ============================================================
 -- ------------------------------------------------------------
@@ -62,7 +62,7 @@ end
 local MDL_CHAT  = "openai/gpt-oss-120b"
 local MDL_CODE  = "openai/gpt-oss-120b"
 local FLY_SPEED = 50
-local HIST_MAX  = 12
+local HIST_MAX  = 6
 
 -- Services
 local Players    = game:GetService("Players")
@@ -72,6 +72,7 @@ local HttpSvc    = game:GetService("HttpService")
 local Lighting   = game:GetService("Lighting")
 local CoreGui    = game:GetService("CoreGui")
 local UIS        = game:GetService("UserInputService")
+local TeleportSvc = game:GetService("TeleportService")
 local LP         = Players.LocalPlayer
 
 -- Character helpers
@@ -200,7 +201,7 @@ local CODE_MODELS = { MDL_CODE, "openai/gpt-oss-20b", MDL_CHAT }
 local function groqCall(model, msgs, maxTok, temp)
     local ok, body = pcall(HttpSvc.JSONEncode, HttpSvc, {
         model=model, messages=msgs,
-        max_tokens=maxTok or 1500, temperature=temp or 0.7,
+        max_tokens=maxTok or 800, temperature=temp or 0.7,
     })
     if not ok then return nil end
 
@@ -262,7 +263,7 @@ local function callChat(sys, user)
     for _, m in ipairs(ChatHist) do table.insert(msgs, m) end
     local reply
     for _, mdl in ipairs(CHAT_MODELS) do
-        reply = groqCall(mdl, msgs, 1500, 0.75)
+        reply = groqCall(mdl, msgs, 800, 0.75)
         if reply then break end
         task.wait(0.5)
     end
@@ -728,7 +729,7 @@ function Scanner.summary()
         for _,c in ipairs(wsKids) do
             local n=0; pcall(function() n=#c:GetChildren() end)
             table.insert(items,"["..c.ClassName.."]"..c.Name..(n>0 and "{"..n.."}" or ""))
-            if #items>=60 then table.insert(items,"[...]"); break end
+            if #items>=30 then table.insert(items,"[...]"); break end
         end
         table.insert(parts,"WORKSPACE("..#wsKids.."): "..table.concat(items,", "))
     end)
@@ -771,7 +772,7 @@ function Scanner.summary()
         local rems=Scanner.remotes()
         if #rems>0 then
             local rlines={}
-            for i=1,math.min(25,#rems) do
+            for i=1,math.min(12,#rems) do
                 table.insert(rlines,rems[i].class..":"..rems[i].name.." @ "..rems[i].path)
             end
             if #rems>25 then table.insert(rlines,"(+"..(#rems-25).." more)") end
@@ -983,6 +984,150 @@ local function execTpBack()
         end
     end)
     print("[JARVIS] Teleported to spawn, sir.")
+end
+
+-- Rejoin current server
+local function execRejoin()
+    pcall(function()
+        TeleportSvc:Teleport(game.PlaceId, LP)
+    end)
+    print("[JARVIS] Rejoining, sir.")
+end
+
+-- Server hop (teleport to a new server)
+local function execServerHop()
+    pcall(function()
+        local servers = {}
+        local ok, res = pcall(function()
+            return HttpSvc:JSONDecode(
+                doReq("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Asc&limit=100", "GET").Body
+            )
+        end)
+        if ok and res and res.data then
+            for _, s in ipairs(res.data) do
+                if s.id ~= game.JobId and s.playing < s.maxPlayers then
+                    table.insert(servers, s.id)
+                end
+            end
+        end
+        if #servers > 0 then
+            TeleportSvc:TeleportToPlaceInstance(game.PlaceId, servers[math.random(1, #servers)], LP)
+        else
+            -- No servers found, just rejoin
+            TeleportSvc:Teleport(game.PlaceId, LP)
+        end
+    end)
+    print("[JARVIS] Server hopping, sir.")
+end
+
+-- Walk character to position
+local function execWalkTo(x, y, z)
+    pcall(function()
+        local hum = getHum(); local hrp = getHRP()
+        if not hum or not hrp then return end
+        hum:MoveTo(Vector3.new(tonumber(x), tonumber(y), tonumber(z)))
+    end)
+    print("[JARVIS] Moving, sir.")
+end
+
+-- Walk to a named part in workspace
+local function execWalkToObj(name)
+    pcall(function()
+        local hum = getHum(); if not hum then return end
+        local results = Scanner.findInGame(name)
+        if #results > 0 then
+            local inst = results[1].inst
+            local pos
+            pcall(function()
+                if inst:IsA("BasePart") then pos = inst.Position
+                elseif inst:IsA("Model") then
+                    local p = inst.PrimaryPart or inst:FindFirstChildWhichIsA("BasePart")
+                    if p then pos = p.Position end
+                end
+            end)
+            if pos then hum:MoveTo(pos) end
+        end
+    end)
+    print("[JARVIS] Walking to "..name..", sir.")
+end
+
+-- Make character look at / face a direction
+local function execFaceDir(dir)
+    pcall(function()
+        local hrp = getHRP(); if not hrp then return end
+        local d = dir:lower()
+        local angles = {
+            north=0, south=180, east=90, west=270,
+            left=270, right=90, forward=0, back=180
+        }
+        local deg = angles[d] or tonumber(dir) or 0
+        hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, math.rad(deg), 0)
+    end)
+end
+
+-- Send Roblox chat message
+local function execChat(msg)
+    pcall(function()
+        local tcs = game:GetService("TextChatService")
+        local ch = tcs.TextChannels:FindFirstChild("RBXGeneral")
+        if ch then ch:SendAsync(msg) end
+    end)
+    print("[JARVIS] Sent chat: "..tostring(msg))
+end
+
+-- Jump once
+local function execJumpOnce()
+    pcall(function()
+        local hum = getHum()
+        if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+    end)
+end
+
+-- Search Delta script hub (loads from common script sources)
+local SCRIPT_SOURCES = {
+    "https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source",
+    "https://rawscripts.net/raw/",
+    "https://pastebin.com/raw/",
+}
+local function execFindOnlineScript(query)
+    task.spawn(function()
+        -- Use AI to find a known loadstring for the script
+        local sys = "You are a Roblox script finder. Return ONLY a single raw loadstring URL (pastebin raw, github raw, etc) for the requested script. No explanation. Just the URL."
+        local msgs = {{ role="system", content=sys }, { role="user", content="Find loadstring URL for: "..query }}
+        local url = nil
+        for _, mdl in ipairs(CHAT_MODELS) do
+            local r = groqCall(mdl, msgs, 200, 0.1)
+            if r then
+                r = r:match("^%s*(.-)%s*$")
+                if r:match("^https?://") then url = r; break end
+            end
+            task.wait(0.3)
+        end
+        if url then
+            addMsg("JARVIS [SEARCH]", "Found script source. Loading from:
+"..url, false)
+            local res = doReq(url, "GET")
+            if res and res.StatusCode == 200 and res.Body and #res.Body > 50 then
+                local fn = loadstring(res.Body)
+                if fn then
+                    local ok, err = pcall(fn)
+                    if ok then
+                        addMsg("JARVIS [SEARCH]", "Script loaded and running, sir.", false)
+                    else
+                        addCodeMsg(res.Body:sub(1,1000), query)
+                        addMsg("JARVIS [SEARCH]", "Script errored on run: "..tostring(err)..". Showing code, sir.", false)
+                    end
+                else
+                    addCodeMsg(res.Body:sub(1,1000), query)
+                    addMsg("JARVIS [SEARCH]", "Could not execute directly. Showing code, sir.", false)
+                end
+            else
+                addMsg("JARVIS [SEARCH]", "Could not fetch that script, sir. URL may be invalid or protected.", false)
+            end
+        else
+            addMsg("JARVIS [SEARCH]", "Could not locate a script for '"..query.."' online, sir. I can write one instead — just ask.", false)
+        end
+    end)
 end
 
 local function execWorkspace(action, target)
@@ -1329,6 +1474,13 @@ local function buildSysPrompt()
         "<<RESEARCH:description>>    -- AI-write and run a custom script",
         "<<SHOWCODE:description>>     -- write a script and SHOW it to user (with copy+run buttons) instead of auto-running",
         "<<RESET>>                    -- respawn/reset the player character",
+        "<<REJOIN>>                   -- rejoin the current game server",
+        "<<SERVERHOP>>               -- hop to a different server",
+        "<<WALKTO:x,y,z>>            -- walk character to coordinates",
+        "<<WALKTOOBJ:name>>          -- walk to a named object in workspace",
+        "<<FACE:direction>>          -- face a direction (north/south/east/west or degrees)",
+        "<<JUMP>>                    -- make character jump once",
+        "<<FINDSCRIPT:query>>        -- search online for a script by name and run it",
         "<<TPBACK>>                   -- teleport back to spawn point",
         "<<RSPY:on/off>>             -- toggle remote call monitoring",
         "<<RSPY_CLEAR>>              -- clear remote spy log",
@@ -1351,6 +1503,10 @@ local function buildSysPrompt()
         "8. Use <<REMEMBER:key=value>> to save anything the user wants remembered across sessions",
         "9. Use <<FORGET:key>> to remove a memory when user asks to forget something",
         "10. 'reset me' / 'respawn' / 'kill me' = <<RESET>>",
+        "11b. 'rejoin' = <<REJOIN>>, 'serverhop' / 'new server' = <<SERVERHOP>>",
+        "11c. 'walk to X' / 'go to X' = <<WALKTOOBJ:X>>, 'walk to coords' = <<WALKTO:x,y,z>>",
+        "11d. 'jump' = <<JUMP>>, 'face north' etc = <<FACE:direction>>",
+        "11e. 'find script for X' / 'search for X script' = <<FINDSCRIPT:X>>",
         "11. 'tp me' / 'teleport me to spawn' = <<TPBACK>>",
         "12. Use <<SHOWCODE:description>> when user asks to 'make a script' or 'write code' — shows it with copy+run buttons",
     }, "\n")
@@ -1386,8 +1542,23 @@ local function parseAndRun(resp)
             local h=getHum(); if h then h.Health=0 end
         end
 
-        if resp:match("<<RESET>>") then execReset() end
-        if resp:match("<<TPBACK>>") then execTpBack() end
+        if resp:match("<<RESET>>")    then execReset() end
+        if resp:match("<<TPBACK>>")   then execTpBack() end
+        if resp:match("<<REJOIN>>")   then execRejoin() end
+        if resp:match("<<SERVERHOP>>") then execServerHop() end
+        if resp:match("<<JUMP>>")     then execJumpOnce() end
+
+        local wt3 = {resp:match("<<WALKTO:(%-?%d+%.?%d*),(%-?%d+%.?%d*),(%-?%d+%.?%d*)>>")}
+        if wt3[1] then execWalkTo(wt3[1], wt3[2], wt3[3]) end
+
+        local wobj = resp:match("<<WALKTOOBJ:(.-)>>")
+        if wobj and wobj~="" then execWalkToObj(wobj) end
+
+        local fdir = resp:match("<<FACE:(.-)>>")
+        if fdir and fdir~="" then execFaceDir(fdir) end
+
+        local fscript = resp:match("<<FINDSCRIPT:(.-)>>")
+        if fscript and fscript~="" then execFindOnlineScript(fscript) end
 
         -- STOPALL - kills everything
         if resp:match("<<STOPALL>>") then
@@ -1559,6 +1730,13 @@ local function parseAndRun(resp)
         :gsub("<<RSPY:[^>]*>>",""):gsub("<<REMEMBER:[^>]*>>","[Noted, sir.]"):gsub("<<FORGET:[^>]*>>","[Forgotten, sir.]")
         :gsub("<<RSPY_CLEAR>>","[Log cleared, sir.]")
         :gsub("<<RESET>>","[Resetting, sir.]")
+        :gsub("<<REJOIN>>","[Rejoining, sir.]")
+        :gsub("<<SERVERHOP>>","[Server hopping, sir.]")
+        :gsub("<<JUMP>>","[Jumping, sir.]")
+        :gsub("<<WALKTO:[^>]*>>","[Moving, sir.]")
+        :gsub("<<WALKTOOBJ:[^>]*>>","[Walking to target, sir.]")
+        :gsub("<<FACE:[^>]*>>","[Facing, sir.]")
+        :gsub("<<FINDSCRIPT:[^>]*>>","[Searching for script, sir.]")
         :gsub("<<TPBACK>>","[Teleporting to spawn, sir.]")
         :gsub("<<STOPALL>>","[All scripts stopped, sir.]")
         :gsub("<<[%u_]+:[^>]*>>",""):gsub("<<[%u]+>>","")
@@ -1637,7 +1815,7 @@ HTi.TextSize=15; HTi.ZIndex=14
 
 local HTt=Instance.new("TextLabel",Hdr)
 HTt.Size=UDim2.new(1,-80,1,0); HTt.Position=UDim2.new(0,34,0,0); HTt.BackgroundTransparency=1
-HTt.Text="J.A.R.V.I.S  v10.4"; HTt.TextColor3=Color3.fromRGB(0,200,255); HTt.Font=Enum.Font.Code
+HTt.Text="J.A.R.V.I.S  v10.6"; HTt.TextColor3=Color3.fromRGB(0,200,255); HTt.Font=Enum.Font.Code
 HTt.TextSize=12; HTt.TextXAlignment=Enum.TextXAlignment.Left; HTt.ZIndex=14
 
 -- Status dot
@@ -1728,7 +1906,45 @@ task.spawn(function()
     end
 end)
 
--- DEX button removed (DEX code still active for AI context/INSPECT/SCAN commands)
+-- DEX button (right side)
+local DexBtn = Instance.new("TextButton", SG)
+DexBtn.Size = UDim2.new(0,42,0,42); DexBtn.AnchorPoint = Vector2.new(1,1)
+DexBtn.Position = UDim2.new(1,-14,1,-34)
+DexBtn.BackgroundColor3 = Color3.fromRGB(0,20,50); DexBtn.ZIndex = 20
+DexBtn.Text = "DEX"; DexBtn.TextColor3 = Color3.fromRGB(0,200,255)
+DexBtn.Font = Enum.Font.GothamBold; DexBtn.TextSize = 10
+Instance.new("UICorner", DexBtn).CornerRadius = UDim.new(1,0)
+local DexBtnS = Instance.new("UIStroke", DexBtn); DexBtnS.Color = Color3.fromRGB(0,180,255)
+DexBtn.MouseButton1Click:Connect(function()
+    if not DexPanel then return end
+    DexOpen = not DexOpen; DexPanel.Visible = DexOpen
+end)
+
+-- Click any part in workspace to inspect it in DEX
+local ClickConn
+local function startClickInspect()
+    if ClickConn then pcall(function() ClickConn:Disconnect() end) end
+    ClickConn = UIS.InputBegan:Connect(function(input, gpe)
+        if gpe then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1
+        and input.UserInputType ~= Enum.UserInputType.Touch then return end
+        if not DexOpen then return end
+        pcall(function()
+            local cam = workspace.CurrentCamera
+            local ray = cam:ScreenPointToRay(input.Position.X, input.Position.Y)
+            local result = workspace:Raycast(ray.Origin, ray.Direction * 1000)
+            if result and result.Instance then
+                local inst = result.Instance
+                -- Show properties in DEX
+                openDexWith(inst)
+                -- Also show full property dump in chat
+                local info = Scanner.inspect(inst)
+                addMsg("DEX ["..inst.ClassName.."]", info, false)
+            end
+        end)
+    end)
+end
+startClickInspect()
 
 -- SPY button (left)
 local SpyBtn=Instance.new("TextButton",SG)
@@ -1918,9 +2134,16 @@ local QuickCmds = {
         execTPlayer(arg); return "Teleporting, sir."
     end,
     ["/reset"]      = function() execReset(); return "Resetting, sir." end,
+    ["/rejoin"]     = function() execRejoin(); return "Rejoining, sir." end,
+    ["/serverhop"]  = function() execServerHop(); return "Server hopping, sir." end,
+    ["/jump"]       = function() execJumpOnce(); return "Jumping, sir." end,
+    ["/chat"]       = function()
+        ChatEnabled = not ChatEnabled
+        return ChatEnabled and "Chat mode on, sir. I will talk to players." or "Chat mode off, sir."
+    end,
     ["/tpback"]     = function() execTpBack(); return "Teleporting to spawn, sir." end,
     ["/help"]       = function()
-        return "/fly /god /noclip /invis /stop /esp /killaura /fullbright /speed <n> /jump <n> /tp <player> /reset /tpback"
+        return "/fly /god /noclip /invis /stop /esp /killaura /fullbright /speed <n> /jump <n> /tp <player> /reset /tpback /rejoin /serverhop /jump /chat (toggle auto-chat)"
     end,
 }
 
@@ -2000,6 +2223,91 @@ do
         end
     end)
 end
+
+-- Chat conversation system
+-- JARVIS talks to other players like a normal person
+-- Also listens for owner commands from chat
+local ChatCooldowns  = {}  -- [playerName] = last reply time
+local CHAT_COOLDOWN  = 8   -- seconds between replies to same person
+local ChatConvHist   = {}  -- separate short history for chat convos
+local ChatEnabled    = true -- owner can toggle this
+
+local SYS_CHAT = table.concat({
+    "You are "..tostring(LP.DisplayName)..", a Roblox player having a normal conversation.",
+    "You are NOT an AI assistant. You are a REAL PLAYER talking casually.",
+    "Keep replies SHORT (1-2 sentences max). Be friendly, chill, use normal player slang.",
+    "NEVER mention being an AI, JARVIS, or assistant. Just chat naturally.",
+    "If someone says something weird just respond like a normal person would.",
+    "Game: "..tostring(game.Name),
+}, "
+")
+
+local function respondToPlayer(playerName, message)
+    if not ChatEnabled then return end
+    local now = os.clock()
+    -- Cooldown check
+    if ChatCooldowns[playerName] and (now - ChatCooldowns[playerName]) < CHAT_COOLDOWN then return end
+    ChatCooldowns[playerName] = now
+
+    task.spawn(function()
+        -- Build short convo history for this chat
+        local msgs = {{ role="system", content=SYS_CHAT }}
+        -- Add last few chat exchanges
+        for _, m in ipairs(ChatConvHist) do table.insert(msgs, m) end
+        table.insert(msgs, { role="user", content=playerName..": "..message })
+
+        local reply
+        for _, mdl in ipairs(CHAT_MODELS) do
+            reply = groqCall(mdl, msgs, 80, 0.9)
+            if reply then break end
+            task.wait(0.3)
+        end
+        if not reply or reply == "" then return end
+
+        -- Clean reply (remove quotes, name prefix, AI artifacts)
+        reply = reply:gsub('^"(.-)"$', "%1")
+                     :gsub("^"..LP.DisplayName..": ", "")
+                     :gsub("^"..LP.Name..": ", "")
+                     :match("^%s*(.-)%s*$") or reply
+        if #reply > 200 then reply = reply:sub(1, 200) end
+
+        -- Save to chat history (keep short)
+        table.insert(ChatConvHist, { role="user",      content=playerName..": "..message })
+        table.insert(ChatConvHist, { role="assistant",  content=reply })
+        if #ChatConvHist > 10 then
+            table.remove(ChatConvHist, 1); table.remove(ChatConvHist, 1)
+        end
+
+        -- Show in JARVIS panel
+        addMsg("Chat -> "..playerName, message, true)
+        addMsg("You -> "..playerName, reply, false)
+
+        -- Send in Roblox chat
+        task.wait(math.random(1, 3)) -- human-like delay
+        pcall(function()
+            local tcs = game:GetService("TextChatService")
+            local ch  = tcs.TextChannels:FindFirstChild("RBXGeneral")
+            if ch then ch:SendAsync(reply) end
+        end)
+    end)
+end
+
+-- Listen to ALL player chat
+pcall(function()
+    local tcs = game:GetService("TextChatService")
+    tcs.MessageReceived:Connect(function(msg)
+        if not msg.TextSource then return end
+        local senderName = msg.TextSource.Name  -- username
+        if senderName == LP.Name then return end -- ignore own messages
+        local text = (msg.Text or ""):match("^%s*(.-)%s*$")
+        if #text < 2 then return end
+        -- Always respond (JARVIS acts as the player)
+        respondToPlayer(senderName, text)
+    end)
+end)
+
+-- Toggle chat responses from JARVIS panel with /chat command
+-- (owner can turn it off if they want to type themselves)
 
 AB.MouseButton1Click:Connect(function()
     if State.guiOpen then
@@ -2280,4 +2588,4 @@ task.spawn(function()
     print("[JARVIS] Scanner warmed up.")
 end)
 
-print("[J.A.R.V.I.S v10.4] Online - tap AI to chat | DEX to explore | SPY for remotes | type /help for quick cmds")
+print("[J.A.R.V.I.S v10.6] Online - tap AI to chat | DEX to explore | SPY for remotes | type /help for quick cmds")
