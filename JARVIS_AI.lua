@@ -1,5 +1,5 @@
 -- ============================================================
---   J.A.R.V.I.S v10.3 | Groq Build
+--   J.A.R.V.I.S v10.4 | Groq Build
 --   Scanner + rSpy + Dex Explorer | Delta / Mobile
 -- ============================================================
 -- ------------------------------------------------------------
@@ -956,6 +956,35 @@ local function execTPlayer(name)
     end)
 end
 
+local function execReset()
+    pcall(function()
+        local h = getHum()
+        if h then
+            h.Health = 0
+        end
+    end)
+    print("[JARVIS] Reset, sir.")
+end
+
+local function execTpBack()
+    pcall(function()
+        local spawnParts = {}
+        for _, v in ipairs(workspace:GetDescendants()) do
+            if v.ClassName == "SpawnLocation" then
+                table.insert(spawnParts, v)
+            end
+        end
+        local hrp = getHRP()
+        if hrp and #spawnParts > 0 then
+            local sp = spawnParts[math.random(1, #spawnParts)]
+            hrp.CFrame = sp.CFrame * CFrame.new(0, 5, 0)
+        elseif hrp then
+            hrp.CFrame = CFrame.new(0, 10, 0)
+        end
+    end)
+    print("[JARVIS] Teleported to spawn, sir.")
+end
+
 local function execWorkspace(action, target)
     pcall(function()
         -- Find by name in workspace (FindFirstChild, never WaitForChild)
@@ -1298,6 +1327,9 @@ local function buildSysPrompt()
         "<<LIBRARY:name>>            -- run: esp killaura rainbow speedgui infinitejump",
         "                               lowgravity fling freezeplayers fullbright bighead giant spin clicktp",
         "<<RESEARCH:description>>    -- AI-write and run a custom script",
+        "<<SHOWCODE:description>>     -- write a script and SHOW it to user (with copy+run buttons) instead of auto-running",
+        "<<RESET>>                    -- respawn/reset the player character",
+        "<<TPBACK>>                   -- teleport back to spawn point",
         "<<RSPY:on/off>>             -- toggle remote call monitoring",
         "<<RSPY_CLEAR>>              -- clear remote spy log",
         "<<SCAN:path>>               -- scan game path, e.g. <<SCAN:ReplicatedStorage>>",
@@ -1318,6 +1350,9 @@ local function buildSysPrompt()
         "7. <<SCAN:>> / <<INSPECT:>> / <<FIND:>> when user asks about game objects",
         "8. Use <<REMEMBER:key=value>> to save anything the user wants remembered across sessions",
         "9. Use <<FORGET:key>> to remove a memory when user asks to forget something",
+        "10. 'reset me' / 'respawn' / 'kill me' = <<RESET>>",
+        "11. 'tp me' / 'teleport me to spawn' = <<TPBACK>>",
+        "12. Use <<SHOWCODE:description>> when user asks to 'make a script' or 'write code' — shows it with copy+run buttons",
     }, "\n")
 end
 
@@ -1350,6 +1385,9 @@ local function parseAndRun(resp)
         if resp:match("<<KILL>>") then
             local h=getHum(); if h then h.Health=0 end
         end
+
+        if resp:match("<<RESET>>") then execReset() end
+        if resp:match("<<TPBACK>>") then execTpBack() end
 
         -- STOPALL - kills everything
         if resp:match("<<STOPALL>>") then
@@ -1393,6 +1431,18 @@ local function parseAndRun(resp)
 
         local rs=resp:match("<<RESEARCH:(.-)>>")
         if rs and rs~="" then execResearch(rs) end
+
+        local showDesc=resp:match("<<SHOWCODE:(.-)>>")
+        if showDesc and showDesc~="" then
+            task.spawn(function()
+                local code=writeScript(showDesc, estimateTokens(showDesc))
+                if code then
+                    addCodeMsg(code, showDesc)
+                else
+                    addMsg("JARVIS","Could not generate that script, sir. Try rephrasing.",false)
+                end
+            end)
+        end
 
         local sc=resp:match("<<SCRIPT[^\n]*\n([%s%S]-)ENDSCRIPT>>")
         if sc and sc~="" then
@@ -1498,6 +1548,7 @@ local function parseAndRun(resp)
     -- Strip all tags from display text
     local clean=resp
         :gsub("<<SCRIPT[%s%S]-ENDSCRIPT>>","[Script executed, sir.]")
+        :gsub("<<SHOWCODE:[^>]*>>","[Here is the script, sir.]")
         :gsub("<<RESEARCH:[^>]*>>","[Researching, sir.]")
         :gsub("<<LIBRARY:[^>]*>>","[Running script, sir.]")
         :gsub("<<SCAN:[^>]*>>","[Scanning, sir.]")
@@ -1507,6 +1558,8 @@ local function parseAndRun(resp)
         :gsub("<<SCAN_SCRIPTS>>","[Script scan complete, sir.]")
         :gsub("<<RSPY:[^>]*>>",""):gsub("<<REMEMBER:[^>]*>>","[Noted, sir.]"):gsub("<<FORGET:[^>]*>>","[Forgotten, sir.]")
         :gsub("<<RSPY_CLEAR>>","[Log cleared, sir.]")
+        :gsub("<<RESET>>","[Resetting, sir.]")
+        :gsub("<<TPBACK>>","[Teleporting to spawn, sir.]")
         :gsub("<<STOPALL>>","[All scripts stopped, sir.]")
         :gsub("<<[%u_]+:[^>]*>>",""):gsub("<<[%u]+>>","")
     return clean:match("^%s*(.-)%s*$") or "Done, sir."
@@ -1584,7 +1637,7 @@ HTi.TextSize=15; HTi.ZIndex=14
 
 local HTt=Instance.new("TextLabel",Hdr)
 HTt.Size=UDim2.new(1,-80,1,0); HTt.Position=UDim2.new(0,34,0,0); HTt.BackgroundTransparency=1
-HTt.Text="J.A.R.V.I.S  v10.3"; HTt.TextColor3=Color3.fromRGB(0,200,255); HTt.Font=Enum.Font.Code
+HTt.Text="J.A.R.V.I.S  v10.4"; HTt.TextColor3=Color3.fromRGB(0,200,255); HTt.Font=Enum.Font.Code
 HTt.TextSize=12; HTt.TextXAlignment=Enum.TextXAlignment.Left; HTt.ZIndex=14
 
 -- Status dot
@@ -1700,29 +1753,103 @@ local function scrollBot()
 end
 
 local thinkRow=nil
-local function addMsg(sender,text,isUser)
-    MsgCount=MsgCount+1
-    local bgC=isUser and Color3.fromRGB(0,20,50) or Color3.fromRGB(0,12,32)
-    local bdC=isUser and Color3.fromRGB(0,80,180) or Color3.fromRGB(0,130,70)
-    local snC=isUser and Color3.fromRGB(80,170,255) or Color3.fromRGB(0,255,130)
-    local row=Instance.new("Frame",CS)
-    row.Size=UDim2.new(1,0,0,0); row.AutomaticSize=Enum.AutomaticSize.Y
-    row.BackgroundColor3=bgC; row.BorderSizePixel=0; row.LayoutOrder=MsgCount; row.ZIndex=14
-    Instance.new("UICorner",row).CornerRadius=UDim.new(0,5)
-    local rs=Instance.new("UIStroke",row); rs.Color=bdC; rs.Thickness=1
-    local rp=Instance.new("UIPadding",row)
-    rp.PaddingLeft=UDim.new(0,6); rp.PaddingRight=UDim.new(0,6)
-    rp.PaddingTop=UDim.new(0,4); rp.PaddingBottom=UDim.new(0,5)
-    Instance.new("UIListLayout",row).SortOrder=Enum.SortOrder.LayoutOrder
-    local sn=Instance.new("TextLabel",row)
-    sn.Size=UDim2.new(1,0,0,13); sn.BackgroundTransparency=1
-    sn.Text=sender; sn.TextColor3=snC; sn.Font=Enum.Font.GothamBold; sn.TextSize=10
-    sn.TextXAlignment=Enum.TextXAlignment.Left; sn.LayoutOrder=1; sn.ZIndex=15
-    local ml=Instance.new("TextLabel",row)
-    ml.Size=UDim2.new(1,0,0,0); ml.AutomaticSize=Enum.AutomaticSize.Y
-    ml.BackgroundTransparency=1; ml.Text=text; ml.TextColor3=Color3.fromRGB(190,220,255)
-    ml.Font=Enum.Font.Code; ml.TextSize=11; ml.TextXAlignment=Enum.TextXAlignment.Left
-    ml.TextWrapped=true; ml.LayoutOrder=2; ml.ZIndex=15
+local function makeRow(isUser)
+    MsgCount = MsgCount + 1
+    local bgC = isUser and Color3.fromRGB(0,20,50) or Color3.fromRGB(0,12,32)
+    local bdC = isUser and Color3.fromRGB(0,80,180) or Color3.fromRGB(0,130,70)
+    local row = Instance.new("Frame", CS)
+    row.Size = UDim2.new(1,0,0,0); row.AutomaticSize = Enum.AutomaticSize.Y
+    row.BackgroundColor3 = bgC; row.BorderSizePixel = 0
+    row.LayoutOrder = MsgCount; row.ZIndex = 14
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0,5)
+    local rs = Instance.new("UIStroke", row); rs.Color = bdC; rs.Thickness = 1
+    local rp = Instance.new("UIPadding", row)
+    rp.PaddingLeft = UDim.new(0,6); rp.PaddingRight = UDim.new(0,6)
+    rp.PaddingTop = UDim.new(0,4); rp.PaddingBottom = UDim.new(0,5)
+    Instance.new("UIListLayout", row).SortOrder = Enum.SortOrder.LayoutOrder
+    return row
+end
+
+local function addMsg(sender, text, isUser)
+    local snC = isUser and Color3.fromRGB(80,170,255) or Color3.fromRGB(0,255,130)
+    local row = makeRow(isUser)
+    local sn = Instance.new("TextLabel", row)
+    sn.Size = UDim2.new(1,0,0,13); sn.BackgroundTransparency = 1
+    sn.Text = sender; sn.TextColor3 = snC; sn.Font = Enum.Font.GothamBold; sn.TextSize = 10
+    sn.TextXAlignment = Enum.TextXAlignment.Left; sn.LayoutOrder = 1; sn.ZIndex = 15
+    local ml = Instance.new("TextLabel", row)
+    ml.Size = UDim2.new(1,0,0,0); ml.AutomaticSize = Enum.AutomaticSize.Y
+    ml.BackgroundTransparency = 1; ml.Text = text
+    ml.TextColor3 = Color3.fromRGB(190,220,255)
+    ml.Font = Enum.Font.Code; ml.TextSize = 11
+    ml.TextXAlignment = Enum.TextXAlignment.Left
+    ml.TextWrapped = true; ml.LayoutOrder = 2; ml.ZIndex = 15
+    scrollBot(); return row
+end
+
+-- Code bubble: shows code with syntax highlight, copy button, and run button
+local function addCodeMsg(code, label)
+    local row = makeRow(false)
+    -- Header label
+    local sn = Instance.new("TextLabel", row)
+    sn.Size = UDim2.new(1,0,0,13); sn.BackgroundTransparency = 1
+    sn.Text = "JARVIS [CODE]"
+    sn.TextColor3 = Color3.fromRGB(0,255,130); sn.Font = Enum.Font.GothamBold; sn.TextSize = 10
+    sn.TextXAlignment = Enum.TextXAlignment.Left; sn.LayoutOrder = 1; sn.ZIndex = 15
+
+    -- Code label
+    local codeBox = Instance.new("Frame", row)
+    codeBox.Size = UDim2.new(1,0,0,0); codeBox.AutomaticSize = Enum.AutomaticSize.Y
+    codeBox.BackgroundColor3 = Color3.fromRGB(0,6,18); codeBox.BorderSizePixel = 0
+    codeBox.LayoutOrder = 2; codeBox.ZIndex = 15
+    Instance.new("UICorner", codeBox).CornerRadius = UDim.new(0,4)
+    Instance.new("UIStroke", codeBox).Color = Color3.fromRGB(0,80,140)
+    local cp = Instance.new("UIPadding", codeBox)
+    cp.PaddingLeft = UDim.new(0,5); cp.PaddingRight = UDim.new(0,5)
+    cp.PaddingTop = UDim.new(0,4); cp.PaddingBottom = UDim.new(0,4)
+    local codeLbl = Instance.new("TextLabel", codeBox)
+    codeLbl.Size = UDim2.new(1,0,0,0); codeLbl.AutomaticSize = Enum.AutomaticSize.Y
+    codeLbl.BackgroundTransparency = 1; codeLbl.Text = code
+    codeLbl.TextColor3 = Color3.fromRGB(160,255,180); codeLbl.Font = Enum.Font.Code
+    codeLbl.TextSize = 10; codeLbl.TextXAlignment = Enum.TextXAlignment.Left
+    codeLbl.TextWrapped = true; codeLbl.ZIndex = 16
+
+    -- Button row
+    local btnRow = Instance.new("Frame", row)
+    btnRow.Size = UDim2.new(1,0,0,26); btnRow.BackgroundTransparency = 1
+    btnRow.LayoutOrder = 3; btnRow.ZIndex = 15
+    local bLL = Instance.new("UIListLayout", btnRow)
+    bLL.FillDirection = Enum.FillDirection.Horizontal
+    bLL.SortOrder = Enum.SortOrder.LayoutOrder
+    bLL.Padding = UDim.new(0,6)
+
+    local function mkBtn(txt, col, order)
+        local b = Instance.new("TextButton", btnRow)
+        b.Size = UDim2.new(0,70,0,22); b.BackgroundColor3 = col
+        b.Text = txt; b.TextColor3 = Color3.fromRGB(255,255,255)
+        b.Font = Enum.Font.GothamBold; b.TextSize = 11; b.ZIndex = 16
+        b.LayoutOrder = order
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0,5)
+        return b
+    end
+
+    local copyBtn = mkBtn("Copy", Color3.fromRGB(0,80,160), 1)
+    local runBtn  = mkBtn("Run", Color3.fromRGB(0,120,50),  2)
+
+    copyBtn.MouseButton1Click:Connect(function()
+        pcall(function() setclipboard(code) end)
+        copyBtn.Text = "Copied!"
+        task.delay(1.5, function() pcall(function() copyBtn.Text = "Copy" end) end)
+    end)
+
+    runBtn.MouseButton1Click:Connect(function()
+        runBtn.Text = "Running..."
+        task.spawn(function()
+            runLua(code, label or "user code", label)
+            task.delay(1, function() pcall(function() runBtn.Text = "Run" end) end)
+        end)
+    end)
+
     scrollBot(); return row
 end
 
@@ -1790,8 +1917,10 @@ local QuickCmds = {
         if not arg then return "Usage: /tp <player>" end
         execTPlayer(arg); return "Teleporting, sir."
     end,
+    ["/reset"]      = function() execReset(); return "Resetting, sir." end,
+    ["/tpback"]     = function() execTpBack(); return "Teleporting to spawn, sir." end,
     ["/help"]       = function()
-        return "/fly /god /noclip /invis /stop /esp /killaura /fullbright /speed <n> /jump <n> /tp <player>"
+        return "/fly /god /noclip /invis /stop /esp /killaura /fullbright /speed <n> /jump <n> /tp <player> /reset /tpback"
     end,
 }
 
@@ -2151,4 +2280,4 @@ task.spawn(function()
     print("[JARVIS] Scanner warmed up.")
 end)
 
-print("[J.A.R.V.I.S v10.3] Online - tap AI to chat | DEX to explore | SPY for remotes | type /help for quick cmds")
+print("[J.A.R.V.I.S v10.4] Online - tap AI to chat | DEX to explore | SPY for remotes | type /help for quick cmds")
