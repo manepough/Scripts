@@ -85,141 +85,102 @@ local state = {
 }
 
 -- ═══════════════════════════════════════════════════════════
---  CONNECTION SYSTEM  (proximity-resistant, clone-hardened)
+--  CONNECTION SYSTEM  (lag-free, proximity-resistant)
 --
---  ROOT CAUSE: Roblox auto-gives network ownership to the
---  nearest player. When another player walks up to your NPC
---  clone the engine silently hands ownership to them, so your
---  client stops simulating the NPC and loses control.
---
---  HOW WE FIGHT IT:
---  1. SimulationRadius set to math.huge EVERY heartbeat so
---     the engine never un-simulates our NPCs due to distance.
---  2. enforceServerOwnership() calls SetNetworkOwner(nil)
---     on EVERY part of the NPC, not just HRP, every frame.
---  3. isConnected() uses THREE independent checks and only
---     returns false when all three agree it's lost.
---  4. A dedicated proximity-watch loop scans all players
---     every 0.1s. If any player is within 20 studs of an NPC
---     we pre-emptively re-claim ownership BEFORE the engine
---     can steal it.
---  5. CloneRecovery.Recover() no longer teleports the local
---     player to the NPC (which caused jitter). Instead it
---     applies a physics "jolt" sequence and calls sethidden-
---     property to force-expand simulation radius around the
---     NPC's position directly.
---  6. A watchdog loop runs every 0.15s and re-recovers any
---     NPC that loses connection, independent of AutoConnect.
+--  KEY DESIGN: nothing iterates NPC descendants every frame.
+--  All heavy work is throttled per-NPC with cooldowns.
+--  Only HRP ownership matters — Roblox decides ownership by
+--  the primary part, not every limb.
 -- ═══════════════════════════════════════════════════════════
 
--- ── Simulation radius: run every heartbeat, not just once ──
-RunService.Heartbeat:Connect(function()
+-- ── SimulationRadius: set once, re-set only on respawn ──
+local function pushSimRadius()
+	if not LocalPlayer then return end
 	pcall(function()
-		if not LocalPlayer then return end
-		-- Always push radius to infinite so no NPC ever falls
-		-- outside our simulation bubble regardless of distance.
 		if sethiddenproperty then
 			sethiddenproperty(LocalPlayer, "SimulationRadius",    math.huge)
 			sethiddenproperty(LocalPlayer, "MaxSimulationRadius", math.huge)
 		end
-		pcall(function() LocalPlayer.SimulationRadius = math.huge end)
-
-		-- Radius visualiser (only when ShowRadius is on)
-		local r       = state.NetworkRange or math.huge
-		local radPart = workspace:FindFirstChild("NPCRadiusVisual")
-		if state.ShowRadius and r ~= math.huge then
-			if not radPart then
-				radPart             = Instance.new("Part")
-				radPart.Name        = "NPCRadiusVisual"
-				radPart.Shape       = Enum.PartType.Ball
-				radPart.Material    = Enum.Material.ForceField
-				radPart.Color       = Color3.fromRGB(0, 255, 0)
-				radPart.Anchored    = true
-				radPart.CanCollide  = false
-				radPart.CastShadow  = false
-				radPart.Parent      = workspace
-			end
-			radPart.Size = Vector3.new(r*2, r*2, r*2)
-			local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-			if myRoot then radPart.Position = myRoot.Position end
-		elseif radPart then
-			radPart:Destroy()
-		end
 	end)
-end)
+end
+pushSimRadius()
+-- Re-apply on character respawn (radius resets on death)
+Players.LocalPlayer and Players.LocalPlayer.CharacterAdded:Connect(pushSimRadius)
 
--- ── Network ownership: claim ALL parts of the NPC, not just HRP ──
-local function enforceServerOwnership(npc)
-	pcall(function()
-		for _, part in ipairs(npc:GetDescendants()) do
-			if part:IsA("BasePart") then
-				-- SetNetworkOwner(nil) = server owns = we can manipulate
-				if type(part.SetNetworkOwner) == "function" then
-					pcall(function() part:SetNetworkOwner(nil) end)
-				end
-				-- Also try the exploit-level function if available
-				if type(setnoop) == "function" then pcall(setnoop, part) end
-			end
-		end
-	end)
-	-- Also try HRP directly via exploit-level getnetworkowner
-	local hrp = npc:FindFirstChild("HumanoidRootPart")
-	if hrp then
+-- Radius visualiser — only runs when ShowRadius is toggled on
+task.spawn(function()
+	while task.wait(0.5) do
 		pcall(function()
-			if type(setnetworkowner) == "function" then
-				setnetworkowner(hrp, nil)
+			local r       = state.NetworkRange or math.huge
+			local radPart = workspace:FindFirstChild("NPCRadiusVisual")
+			if state.ShowRadius and r ~= math.huge then
+				if not radPart then
+					radPart            = Instance.new("Part")
+					radPart.Name       = "NPCRadiusVisual"
+					radPart.Shape      = Enum.PartType.Ball
+					radPart.Material   = Enum.Material.ForceField
+					radPart.Color      = Color3.fromRGB(0, 255, 0)
+					radPart.Anchored   = true
+					radPart.CanCollide = false
+					radPart.CastShadow = false
+					radPart.Parent     = workspace
+				end
+				radPart.Size = Vector3.new(r*2, r*2, r*2)
+				local myRoot = LocalPlayer and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+				if myRoot then radPart.Position = myRoot.Position end
+			elseif radPart then
+				radPart:Destroy()
 			end
 		end)
 	end
+end)
+
+-- ── Ownership: only HRP needs SetNetworkOwner(nil) ──
+-- Roblox determines ownership from the assembly root (HRP).
+-- Iterating all limbs was the #1 lag source — removed.
+local function enforceServerOwnership(npc)
+	local hrp = npc:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+	pcall(function() hrp:SetNetworkOwner(nil) end)
+	pcall(function()
+		if type(setnetworkowner) == "function" then
+			setnetworkowner(hrp, nil)
+		end
+	end)
 end
 
--- ── Three-method connection check ──
+-- ── Connection check: fast path first, pcall only as fallback ──
 local function isConnected(npc)
 	local hrp = npc:FindFirstChild("HumanoidRootPart")
 	if not hrp then return false end
 
-	-- Method 1: exploit-level getnetworkowner
-	local ok1, owner1 = pcall(function()
-		if type(getnetworkowner) == "function" then
-			return getnetworkowner(hrp)
-		end
-		error("n/a")
-	end)
-	if ok1 and owner1 == nil then return true end
+	-- Fast path: exploit-level owner check (no pcall overhead if available)
+	if type(getnetworkowner) == "function" then
+		local ok, owner = pcall(getnetworkowner, hrp)
+		if ok and owner == nil then return true end
+	end
 
-	-- Method 2: Roblox API GetNetworkOwner
-	local ok2, owner2 = pcall(function()
-		return hrp:GetNetworkOwner()
-	end)
+	-- Standard API fallback
+	local ok2, owner2 = pcall(function() return hrp:GetNetworkOwner() end)
 	if ok2 and owner2 == nil then return true end
 
-	-- Method 3: ReceiveAge == 0 means physics packet arrived this
-	-- frame from the server, i.e. we are simulating it locally.
+	-- ReceiveAge fallback: 0 = we are simulating this part locally
 	local ok3, age = pcall(function() return hrp.ReceiveAge end)
 	if ok3 and age == 0 and not hrp.Anchored then return true end
 
 	return false
 end
 
--- ── Low-level force connect: jolt + state reset on all parts ──
+-- ── forceConnect: lightweight — no descendant iteration ──
 local function forceConnect(npc)
 	local hrp = npc:FindFirstChild("HumanoidRootPart")
 	if not hrp then return end
 	local hum = npc:FindFirstChild("Humanoid")
 	if not hum or hum.Health <= 0 then return end
 
-	-- Step 1: strip ownership from every part first
 	enforceServerOwnership(npc)
-
-	-- Step 2: unlock physics
 	hrp.Anchored = false
-	for _, part in ipairs(npc:GetDescendants()) do
-		if part:IsA("BasePart") then
-			pcall(function() part.Anchored = false end)
-		end
-	end
 
-	-- Step 3: humanoid state reset
 	pcall(function()
 		hum:ChangeState(Enum.HumanoidStateType.Running)
 		hum.PlatformStand = false
@@ -227,99 +188,56 @@ local function forceConnect(npc)
 		hum.AutoRotate    = true
 	end)
 
-	-- Step 4: multi-axis physics jolt to wake up simulation
-	-- A single axis nudge sometimes isn't enough when another
-	-- player is standing right next to the NPC.
+	-- Single upward nudge is enough to wake physics
 	pcall(function()
-		local cur = hrp.AssemblyLinearVelocity
-		hrp.AssemblyLinearVelocity = cur + Vector3.new(0.01, 0.05, 0.01)
-		task.defer(function()
-			pcall(function()
-				hrp.AssemblyLinearVelocity = hrp.AssemblyLinearVelocity - Vector3.new(0.01, 0, 0.01)
-			end)
-		end)
+		hrp.AssemblyLinearVelocity = hrp.AssemblyLinearVelocity + Vector3.new(0, 0.05, 0)
 	end)
-
-	-- Step 5: If sethiddenproperty is available, expand simulation
-	-- radius centered on the NPC's current position as a hint to
-	-- the physics engine to keep simulating this area.
-	if sethiddenproperty and LocalPlayer then
-		pcall(function()
-			sethiddenproperty(LocalPlayer, "SimulationRadius",    math.huge)
-			sethiddenproperty(LocalPlayer, "MaxSimulationRadius", math.huge)
-		end)
-	end
 end
 
 -- ═══════════════════════════════════════════════════════════
---  CLONE RECOVERY  (no player teleport = no jitter)
+--  CLONE RECOVERY  (throttled, non-blocking, no jitter)
 -- ═══════════════════════════════════════════════════════════
 local CloneRecovery    = {}
-local recoveryInFlight = {}   -- prevent overlapping recoveries on same NPC
+local recoveryInFlight = {}
 
 function CloneRecovery.IsConnected(npc)
 	return isConnected(npc)
 end
 
 function CloneRecovery.Recover(npc)
-	if CloneRecovery.IsConnected(npc) then return true end
-	if recoveryInFlight[npc] then return false end   -- already recovering
+	if isConnected(npc) then return true end
+	if recoveryInFlight[npc] then return false end
 	recoveryInFlight[npc] = true
 
-	local hrp = npc:FindFirstChild("HumanoidRootPart")
-	if not hrp then recoveryInFlight[npc] = nil; return false end
-
-	-- Phase 1: rapid jolt burst (no player teleport needed)
-	for i = 1, 3 do
-		forceConnect(npc)
-		if CloneRecovery.IsConnected(npc) then
-			recoveryInFlight[npc] = nil
-			return true
-		end
-		task.wait(0.05)
-	end
-
-	-- Phase 2: short pause then retry burst
-	task.wait(0.1)
-	for i = 1, 10 do
-		forceConnect(npc)
-		if CloneRecovery.IsConnected(npc) then
-			recoveryInFlight[npc] = nil
-			return true
-		end
-		task.wait(0.06)
-	end
-
-	-- Phase 3: final aggressive burst
+	-- Burst: 5 attempts, 0.1s apart — enough to reclaim without flooding
 	for i = 1, 5 do
-		enforceServerOwnership(npc)
 		forceConnect(npc)
-		task.wait(0.04)
+		if isConnected(npc) then
+			recoveryInFlight[npc] = nil
+			return true
+		end
+		task.wait(0.1)
 	end
 
 	recoveryInFlight[npc] = nil
-	return CloneRecovery.IsConnected(npc)
+	return isConnected(npc)
 end
 
 function CloneRecovery.Verify(npc)
-	if CloneRecovery.IsConnected(npc) then return true end
-	-- Non-blocking: spawn recovery, return current state
+	if isConnected(npc) then return true end
 	task.spawn(function() CloneRecovery.Recover(npc) end)
 	return false
 end
 
 -- ═══════════════════════════════════════════════════════════
---  PROXIMITY WATCH  — the key fix for "player walks up" bug
---
---  Runs every 0.1s and checks if any player is within
---  PROXIMITY_STEAL_RANGE studs of each NPC. If so, we
---  immediately re-claim ownership BEFORE Roblox can auto-
---  transfer it to that player.
+--  PROXIMITY WATCH  — pre-empt ownership steal
+--  Runs every 0.5s (not 0.1s). Only fires enforceServer-
+--  Ownership when a player is actually close — not every tick.
 -- ═══════════════════════════════════════════════════════════
-local PROXIMITY_STEAL_RANGE = 20  -- studs at which Roblox starts stealing ownership
+local PROXIMITY_STEAL_RANGE = 20
 
 task.spawn(function()
-	while task.wait(0.1) do
+	while task.wait(0.5) do
 		pcall(function()
 			local allPlayers = Players:GetPlayers()
 			for _, npc in ipairs(cachedNpcsList) do
@@ -327,26 +245,17 @@ task.spawn(function()
 				local hum = npc:FindFirstChild("Humanoid")
 				if not hrp or not hum or hum.Health <= 0 then continue end
 
-				local threatened = false
 				for _, p in ipairs(allPlayers) do
 					if p == LocalPlayer then continue end
-					local pChar = p.Character
-					local pRoot = pChar and pChar:FindFirstChild("HumanoidRootPart")
+					local pRoot = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
 					if pRoot and (pRoot.Position - hrp.Position).Magnitude < PROXIMITY_STEAL_RANGE then
-						threatened = true
+						-- Someone is close — reclaim HRP ownership only
+						enforceServerOwnership(npc)
+						if not isConnected(npc) then
+							task.spawn(function() CloneRecovery.Recover(npc) end)
+						end
 						break
 					end
-				end
-
-				if threatened then
-					-- Pre-emptively re-claim before the engine can transfer
-					enforceServerOwnership(npc)
-					-- Also nudge so physics stays local
-					pcall(function()
-						if not isConnected(npc) then
-							forceConnect(npc)
-						end
-					end)
 				end
 			end
 		end)
@@ -354,23 +263,20 @@ task.spawn(function()
 end)
 
 -- ═══════════════════════════════════════════════════════════
---  WATCHDOG  — independent background recovery loop
---  Catches any NPC that slipped through, regardless of
---  whether AutoConnect is on.
+--  WATCHDOG  — catch any NPC that slipped through
+--  Runs every 1s, not 0.15s. Recovery has its own cooldown.
 -- ═══════════════════════════════════════════════════════════
 task.spawn(function()
-	while task.wait(0.15) do
+	while task.wait(1) do
 		pcall(function()
 			for _, npc in ipairs(cachedNpcsList) do
 				local hum = npc:FindFirstChild("Humanoid")
 				if hum and hum.Health > 0 and not isConnected(npc) then
 					local cache   = npcCache[npc]
 					local lastTry = cache and cache.lastWatchdogTry or 0
-					if tick() - lastTry > 0.5 then
+					if tick() - lastTry > 2 then
 						if cache then cache.lastWatchdogTry = tick() end
-						task.spawn(function()
-							CloneRecovery.Recover(npc)
-						end)
+						task.spawn(function() CloneRecovery.Recover(npc) end)
 					end
 				end
 			end
@@ -907,28 +813,24 @@ end)
 
 -- ═══════════════════════════════════════════════════════════
 --  PERSISTENT OWNERSHIP ENFORCEMENT LOOP
---  Runs every 0.2s regardless of AutoConnect toggle.
---  • Re-claims ownership on ALL NPCs continuously
---  • Fires recovery if any NPC lost connection
---  • Extra aggressive when AutoConnect is ON
+--  Runs every 1s. Only does HRP SetNetworkOwner — no loops
+--  over descendants. Recovery fires with a per-NPC cooldown.
 -- ═══════════════════════════════════════════════════════════
 task.spawn(function()
-	while task.wait(0.2) do
+	while task.wait(1) do
 		pcall(function()
 			local npcs = getNPCs()
 			for _, npc in ipairs(npcs) do
 				local hum = npc:FindFirstChild("Humanoid")
 				if not hum or hum.Health <= 0 then continue end
 
-				-- Always re-enforce ownership, whether connected or not
-				enforceServerOwnership(npc)
+				enforceServerOwnership(npc)  -- HRP only, cheap
 
-				local connected = isConnected(npc)
-				local cache     = npcCache[npc]
-
-				if not connected then
+				if not isConnected(npc) then
+					local cache   = npcCache[npc]
 					local lastTry = cache and cache.lastForceConnect or 0
-					if tick() - lastTry > (state.AutoConnect and 0.4 or 1.0) then
+					local cd      = state.AutoConnect and 1 or 3
+					if tick() - lastTry > cd then
 						if cache then cache.lastForceConnect = tick() end
 						task.spawn(function() CloneRecovery.Recover(npc) end)
 					end
@@ -1554,15 +1456,13 @@ RunService.Heartbeat:Connect(function()
 			local hum = npc:FindFirstChild("Humanoid")
 			if not hrp then continue end
 
-			-- Always enforce ownership every frame — no range gate,
-			-- no AutoConnect gate. This is what keeps clones from
-			-- losing connection when another player walks nearby.
-			enforceServerOwnership(npc)
+			-- Lightweight per-frame pass: just keep HRP unanchored
+			-- and physics ticking. Heavy ownership work is handled
+			-- by the throttled loops, not here.
 			hrp.Anchored = false
 			pcall(function()
 				local vel = hrp.AssemblyLinearVelocity
-				if vel.Magnitude < 0.1 then
-					-- Micro-nudge to keep physics ticking locally
+				if vel.Magnitude < 0.01 then
 					hrp.AssemblyLinearVelocity = vel + Vector3.new(0, 0.001, 0)
 				end
 			end)
