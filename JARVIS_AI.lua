@@ -5,7 +5,7 @@
 -- ------------------------------------------------------------
 -- CONFIG - put your Gemini API key here
 -- ------------------------------------------------------------
-local gemini_key = os.getenv("GEMINI_API_KEY")
+local YOUR_GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 -- ------------------------------------------------------------
 
 -- Gemini model to use (free tier)
@@ -2042,4 +2042,3 @@ task.spawn(function()
 end)
 
 print("[J.A.R.V.I.S v10.1] Online - tap AI to chat | DEX to explore | SPY for remotes | type /help for quick cmds")
-)
