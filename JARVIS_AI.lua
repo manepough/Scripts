@@ -1,11 +1,19 @@
 -- ============================================================
---   J.A.R.V.I.S v10.2 | Gemini Build
+--   J.A.R.V.I.S v10.3 | Gemini Build
 --   Scanner + rSpy + Dex Explorer | Delta / Mobile
 -- ============================================================
 -- ------------------------------------------------------------
 -- CONFIG - put your Gemini API key here
 -- ------------------------------------------------------------
-local GEMINI_API_KEY = "AQ.Ab8RN6J1xVnvGacTRL73nXHnwK7qrU9pBZgrkl0DHTDfrl-Pug"
+-- Read key from Delta workspace file: put your key in a file called "jarvis.env" in Delta's workspace folder
+local YOUR_GEMINI_API_KEY = ""
+pcall(function()
+    local raw = readfile("jarvis.env")
+    YOUR_GEMINI_API_KEY = raw:match("^%s*(.-)%s*$") or ""
+end)
+if YOUR_GEMINI_API_KEY == "" then
+    warn("[JARVIS] No API key found. Create jarvis.env in Delta workspace with your Gemini key.")
+end
 -- ------------------------------------------------------------
 
 -- Gemini model to use (free tier)
@@ -41,6 +49,42 @@ local ScriptConns= {}
 local ChatHist   = {}
 local MsgCount   = 0
 local RSpyLog    = {}
+
+-- Persistent memory (saved to Delta workspace as jarvis_memory.json)
+local Memory = {}
+local MEMORY_FILE = "jarvis_memory.json"
+local function loadMemory()
+    pcall(function()
+        if isfile(MEMORY_FILE) then
+            local raw = readfile(MEMORY_FILE)
+            local ok, data = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), raw)
+            if ok and type(data) == "table" then Memory = data end
+        end
+    end)
+end
+local function saveMemory()
+    pcall(function()
+        local ok, encoded = pcall(game:GetService("HttpService").JSONEncode, game:GetService("HttpService"), Memory)
+        if ok then writefile(MEMORY_FILE, encoded) end
+    end)
+end
+local function rememberFact(key, value)
+    Memory[key] = value
+    saveMemory()
+end
+local function forgetFact(key)
+    Memory[key] = nil
+    saveMemory()
+end
+local function getMemoryContext()
+    local lines = {}
+    for k, v in pairs(Memory) do
+        table.insert(lines, k .. ": " .. tostring(v))
+    end
+    if #lines == 0 then return "" end
+    return "\n=== MEMORY ===\n" .. table.concat(lines, "\n")
+end
+loadMemory()
 local RSpyActive = false
 local ScanCache  = { data=nil, time=-999 }
 
@@ -98,15 +142,35 @@ local CODE_MODELS = { MDL_CODE, MDL_CHAT, "gemini-1.5-flash" }
 
 -- Convert OpenAI-style messages to Gemini format
 local function toGeminiContents(msgs)
-    local contents = {}
+    -- Extract system prompt and merge into first user message
+    local sysText = ""
+    local rest = {}
     for _, m in ipairs(msgs) do
-        local role = m.role == "assistant" and "model" or "user"
-        -- Gemini does not have a system role; prepend system as first user turn
         if m.role == "system" then
-            table.insert(contents, 1, { role="user", parts={{ text=m.content }} })
+            sysText = m.content
         else
-            table.insert(contents, { role=role, parts={{ text=m.content }} })
+            table.insert(rest, m)
         end
+    end
+    local contents = {}
+    for i, m in ipairs(rest) do
+        local role = m.role == "assistant" and "model" or "user"
+        local text = m.content
+        -- Prepend system prompt to the first user message
+        if i == 1 and role == "user" and sysText ~= "" then
+            text = "[SYSTEM INSTRUCTIONS]\n" .. sysText .. "\n[END SYSTEM]\n\n" .. text
+        end
+        -- Gemini requires alternating turns; skip consecutive same-role messages
+        if #contents == 0 or contents[#contents].role ~= role then
+            table.insert(contents, { role=role, parts={{ text=text }} })
+        else
+            -- Merge into previous turn
+            contents[#contents].parts[1].text = contents[#contents].parts[1].text .. "\n" .. text
+        end
+    end
+    -- Must start with user turn
+    if #contents == 0 or contents[1].role ~= "user" then
+        table.insert(contents, 1, { role="user", parts={{ text=sysText ~= "" and sysText or "Hello" }} })
     end
     return contents
 end
@@ -116,7 +180,7 @@ local function geminiCall(model, msgs, maxTok, temp)
     local payload = {
         contents = contents,
         generationConfig = {
-            maxOutputTokens = maxTok or 600,
+            maxOutputTokens = maxTok or 1500,
             temperature     = temp or 0.7,
         },
     }
@@ -151,7 +215,7 @@ local function callChat(sys, user)
     for _, m in ipairs(ChatHist) do table.insert(msgs, m) end
     local reply
     for _, mdl in ipairs(CHAT_MODELS) do
-        reply = geminiCall(mdl, msgs, 600, 0.75)
+        reply = geminiCall(mdl, msgs, 1500, 0.75)
         if reply then break end
         task.wait(0.5)
     end
@@ -1137,7 +1201,7 @@ local function gatherData()
     pcall(function()
         if hum then hp=math.floor(hum.Health); spd=math.floor(hum.WalkSpeed) end
     end)
-    local scanData="?"; pcall(function() scanData=Scanner.summary() end)
+    local scanData="?"; pcall(function() if ScanCache.data then scanData=ScanCache.data end end)
     local spyData=""
     if RSpyActive and #RSpyLog>0 then
         spyData="\nRSPY (last 6):\n"..table.concat(RSpy.recent(6),"\n")
@@ -1158,11 +1222,12 @@ local function buildSysPrompt()
     local pnames={}
     pcall(function() for _,p in ipairs(Players:GetPlayers()) do table.insert(pnames,p.Name) end end)
     return table.concat({
-        "You are J.A.R.V.I.S from Iron Man. Calm, dry wit, loyal. Address user as 'sir'.",
-        "Use action tags to run commands. Never put code in reply text. Max 2 sentences per reply.",
+        "You are J.A.R.V.I.S from Iron Man. Calm, dry wit, loyal. Address user as 'sir'. Be thorough and detailed when needed.",
+        "Use action tags to run commands. Never put code in reply text. Give full answers - do not cut yourself off.",
         "If uncertain about any value, say so - never fabricate data.",
         "",
         "=== LIVE SCAN ===",
+        getMemoryContext(),
         data,
         "EXACT PLAYER NAMES: "..table.concat(pnames,", "),
         "",
@@ -1193,6 +1258,8 @@ local function buildSysPrompt()
         "<<FIND:name>>               -- search whole game for instances by name",
         "<<SCAN_REMOTES>>            -- list all RemoteEvents/Functions",
         "<<SCAN_SCRIPTS>>            -- list all Scripts/LocalScripts",
+        "<<REMEMBER:key=value>>      -- save something to persistent memory",
+        "<<FORGET:key>>              -- remove from persistent memory",
         "",
         "=== RULES ===",
         "1. 'stop' / 'stop everything' / 'off' for all features = <<STOPALL>>",
@@ -1202,6 +1269,8 @@ local function buildSysPrompt()
         "5. Fields marked '?' are unavailable - do NOT invent values",
         "6. <<CHAT:>> only when user explicitly wants to send a message",
         "7. <<SCAN:>> / <<INSPECT:>> / <<FIND:>> when user asks about game objects",
+        "8. Use <<REMEMBER:key=value>> to save anything the user wants remembered across sessions",
+        "9. Use <<FORGET:key>> to remove a memory when user asks to forget something",
     }, "\n")
 end
 
@@ -1304,6 +1373,12 @@ local function parseAndRun(resp)
         end
         if resp:match("<<RSPY_CLEAR>>") then RSpy.clear(); refreshSpyPanel() end
 
+        -- Memory
+        local remKey, remVal = resp:match("<<REMEMBER:([^=]+)=(.-)>>")
+        if remKey and remVal then rememberFact(remKey:match("^%s*(.-)%s*$"), remVal:match("^%s*(.-)%s*$")) end
+        local forgetKey = resp:match("<<FORGET:(.-)>>")
+        if forgetKey then forgetFact(forgetKey:match("^%s*(.-)%s*$")) end
+
         -- Scan
         local scanPath=resp:match("<<SCAN:(.-)>>")
         if scanPath and scanPath~="" then
@@ -1383,7 +1458,7 @@ local function parseAndRun(resp)
         :gsub("<<FIND:[^>]*>>","[Searching, sir.]")
         :gsub("<<SCAN_REMOTES>>","[Remote scan complete, sir.]")
         :gsub("<<SCAN_SCRIPTS>>","[Script scan complete, sir.]")
-        :gsub("<<RSPY:[^>]*>>","")
+        :gsub("<<RSPY:[^>]*>>",""):gsub("<<REMEMBER:[^>]*>>","[Noted, sir.]"):gsub("<<FORGET:[^>]*>>","[Forgotten, sir.]")
         :gsub("<<RSPY_CLEAR>>","[Log cleared, sir.]")
         :gsub("<<STOPALL>>","[All scripts stopped, sir.]")
         :gsub("<<[%u_]+:[^>]*>>",""):gsub("<<[%u]+>>","")
@@ -1462,7 +1537,7 @@ HTi.TextSize=15; HTi.ZIndex=14
 
 local HTt=Instance.new("TextLabel",Hdr)
 HTt.Size=UDim2.new(1,-80,1,0); HTt.Position=UDim2.new(0,34,0,0); HTt.BackgroundTransparency=1
-HTt.Text="J.A.R.V.I.S  v10.1"; HTt.TextColor3=Color3.fromRGB(0,200,255); HTt.Font=Enum.Font.Code
+HTt.Text="J.A.R.V.I.S  v10.3"; HTt.TextColor3=Color3.fromRGB(0,200,255); HTt.Font=Enum.Font.Code
 HTt.TextSize=12; HTt.TextXAlignment=Enum.TextXAlignment.Left; HTt.ZIndex=14
 
 -- Status dot
@@ -1553,19 +1628,7 @@ task.spawn(function()
     end
 end)
 
--- DEX button (right)
-local DexBtn=Instance.new("TextButton",SG)
-DexBtn.Size=UDim2.new(0,42,0,42); DexBtn.AnchorPoint=Vector2.new(1,1)
-DexBtn.Position=UDim2.new(1,-14,1,-34)
-DexBtn.BackgroundColor3=Color3.fromRGB(0,20,50); DexBtn.ZIndex=20
-DexBtn.Text="DEX"; DexBtn.TextColor3=Color3.fromRGB(0,200,255)
-DexBtn.Font=Enum.Font.GothamBold; DexBtn.TextSize=10
-Instance.new("UICorner",DexBtn).CornerRadius=UDim.new(1,0)
-Instance.new("UIStroke",DexBtn).Color=Color3.fromRGB(0,180,255)
-DexBtn.MouseButton1Click:Connect(function()
-    if not DexPanel then return end
-    DexOpen=not DexOpen; DexPanel.Visible=DexOpen
-end)
+-- DEX button removed (DEX code still active for AI context/INSPECT/SCAN commands)
 
 -- SPY button (left)
 local SpyBtn=Instance.new("TextButton",SG)
@@ -2041,4 +2104,4 @@ task.spawn(function()
     print("[JARVIS] Scanner warmed up.")
 end)
 
-print("[J.A.R.V.I.S v10.1] Online - tap AI to chat | DEX to explore | SPY for remotes | type /help for quick cmds")
+print("[J.A.R.V.I.S v10.3] Online - tap AI to chat | DEX to explore | SPY for remotes | type /help for quick cmds")
