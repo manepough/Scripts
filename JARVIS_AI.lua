@@ -59,8 +59,8 @@ end
 -- ------------------------------------------------------------
 
 -- Gemini model to use (free tier)
-local MDL_CHAT  = "llama-3.3-70b-versatile"
-local MDL_CODE  = "compound-beta"
+local MDL_CHAT  = "openai/gpt-oss-120b"
+local MDL_CODE  = "openai/gpt-oss-120b"
 local FLY_SPEED = 50
 local HIST_MAX  = 12
 
@@ -194,8 +194,8 @@ local function doReq(url, method, body)
 end
 
 -- --- GROQ API ---
-local CHAT_MODELS = { MDL_CHAT, "llama-3.1-8b-instant", "gemma2-9b-it" }
-local CODE_MODELS = { MDL_CODE, MDL_CHAT, "llama-3.1-8b-instant" }
+local CHAT_MODELS = { MDL_CHAT, "openai/gpt-oss-20b", "qwen/qwen3.6-27b" }
+local CODE_MODELS = { MDL_CODE, "openai/gpt-oss-20b", MDL_CHAT }
 
 local function groqCall(model, msgs, maxTok, temp)
     local ok, body = pcall(HttpSvc.JSONEncode, HttpSvc, {
