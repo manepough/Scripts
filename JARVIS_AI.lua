@@ -6,12 +6,12 @@
 -- CONFIG - put your Gemini API key here
 -- ------------------------------------------------------------
 -- Read key from Delta workspace file: put your key in a file called "jarvis.env" in Delta's workspace folder
-local YOUR_GEMINI_API_KEY = ""
+local API_KEY = ""
 pcall(function()
     local raw = readfile("jarvis.env")
-    YOUR_GEMINI_API_KEY = raw:match("^%s*(.-)%s*$") or ""
+    API_KEY = raw:match("^%s*(.-)%s*$") or ""
 end)
-if YOUR_GEMINI_API_KEY == "" then
+if API_KEY == "" then
     warn("[JARVIS] No API key found. Create jarvis.env in Delta workspace with your Gemini key.")
 end
 -- ------------------------------------------------------------
