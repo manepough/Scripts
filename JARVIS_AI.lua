@@ -1129,7 +1129,7 @@ local function execFindOnlineScript(query)
                 addMsg("JARVIS [SEARCH]", "Could not fetch that script, sir. URL may be invalid or protected.", false)
             end
         else
-            addMsg("JARVIS [SEARCH]", "Could not locate a script for '"..query.."' online, sir. I can write one instead — just ask.", false)
+            addMsg("JARVIS [SEARCH]", "Could not locate a script for '"..query.."' online, sir. I can write one instead - just ask.", false)
         end
     end)
 end
@@ -1512,7 +1512,7 @@ local function buildSysPrompt()
         "11d. 'jump' = <<JUMP>>, 'face north' etc = <<FACE:direction>>",
         "11e. 'find script for X' / 'search for X script' = <<FINDSCRIPT:X>>",
         "11. 'tp me' / 'teleport me to spawn' = <<TPBACK>>",
-        "12. Use <<SHOWCODE:description>> when user asks to 'make a script' or 'write code' — shows it with copy+run buttons",
+        "12. Use <<SHOWCODE:description>> when user asks to 'make a script' or 'write code' - shows it with copy+run buttons",
     }, "\n")
 end
 
