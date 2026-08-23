@@ -1108,8 +1108,7 @@ local function execFindOnlineScript(query)
             task.wait(0.3)
         end
         if url then
-            addMsg("JARVIS [SEARCH]", "Found script source. Loading from:
-"..url, false)
+            addMsg("JARVIS [SEARCH]", "Found script source. Loading from: "..url, false)
             local res = doReq(url, "GET")
             if res and res.StatusCode == 200 and res.Body and #res.Body > 50 then
                 local fn = loadstring(res.Body)
@@ -2240,8 +2239,7 @@ local SYS_CHAT = table.concat({
     "NEVER mention being an AI, JARVIS, or assistant. Just chat naturally.",
     "If someone says something weird just respond like a normal person would.",
     "Game: "..tostring(game.Name),
-}, "
-")
+}, "\n")
 
 local function respondToPlayer(playerName, message)
     if not ChatEnabled then return end
