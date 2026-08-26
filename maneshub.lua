@@ -360,17 +360,8 @@ makeToggle(deadlyTab, "Delete all blocks", 1, function(state)
 
                 -- getclosestcubes gets ALL bricks in the whole Bricks folder
                 local gcc = getclosestcubes(hrp.Position)
-                -- filter to only player's own bricks
-                local own = {}
-                local cfolder = workspace:FindFirstChild("Bricks")
-                local playerFolder = cfolder and cfolder:FindFirstChild(player.Name)
-                for _, v in gcc do
-                    if playerFolder and v[1]:IsDescendantOf(playerFolder) then
-                        table.insert(own, v)
-                    end
-                end
 
-                for _, v in own do
+                for _, v in gcc do
                     if not deleteRunning then break end
                     if v[1]:IsA("BasePart") and v[1].Parent then
                         -- glow red
