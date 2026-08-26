@@ -3,6 +3,7 @@
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local mouse = player:GetMouse()
@@ -18,6 +19,47 @@ screenGui.Parent = player.PlayerGui
 local blur = Instance.new("BlurEffect")
 blur.Size = 0
 blur.Parent = game.Lighting
+
+-- === HELPERS ===
+
+-- findbtools: finds tool from backpack OR character (same logic as command line)
+local function findbtools(name)
+    local btools = {}
+    for _, v in player.Backpack:GetChildren() do
+        if v:IsA("Tool") and v.Name == name and v:FindFirstChild("Script") and v.Script:FindFirstChild("Event") then
+            table.insert(btools, {bt = v, e = v.Script.Event})
+        end
+    end
+    if player.Character then
+        for _, v in player.Character:GetChildren() do
+            if v:IsA("Tool") and v.Name == name and v:FindFirstChild("Script") and v.Script:FindFirstChild("Event") then
+                table.insert(btools, {bt = v, e = v.Script.Event})
+            end
+        end
+    end
+    return btools
+end
+
+-- checktool: equips tool to character if not already equipped
+local function checktool(t)
+    if player.Character and not player.Character:FindFirstChild(t.Name) then
+        t.Parent = player.Character
+    end
+end
+
+-- getclosestcubes: gets all bricks from the Bricks folder sorted by distance
+local function getclosestcubes(pos)
+    local cubes = {}
+    local cfolder = workspace:FindFirstChild("Bricks")
+    if not cfolder then return cubes end
+    for _, v in cfolder:GetDescendants() do
+        if v:IsA("BasePart") then
+            table.insert(cubes, {v, (v.Position - pos).Magnitude})
+        end
+    end
+    table.sort(cubes, function(a, b) return a[2] < b[2] end)
+    return cubes
+end
 
 -- Main window
 local bg = Instance.new("Frame")
@@ -53,7 +95,7 @@ tbFix.BorderSizePixel = 0
 tbFix.ZIndex = 6
 
 local titleLbl = Instance.new("TextLabel", titleBar)
-titleLbl.Size = UDim2.new(1, -50, 1, 0)
+titleLbl.Size = UDim2.new(1, -80, 1, 0)
 titleLbl.Position = UDim2.new(0, 14, 0, 0)
 titleLbl.BackgroundTransparency = 1
 titleLbl.Font = Enum.Font.GothamBold
@@ -63,6 +105,20 @@ titleLbl.Text = "ManesHub"
 titleLbl.TextXAlignment = Enum.TextXAlignment.Left
 titleLbl.ZIndex = 7
 
+-- Minimize button (-)
+local minBtn = Instance.new("TextButton", titleBar)
+minBtn.Size = UDim2.new(0, 24, 0, 24)
+minBtn.Position = UDim2.new(1, -58, 0.5, -12)
+minBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+minBtn.BorderSizePixel = 0
+minBtn.Text = "-"
+minBtn.Font = Enum.Font.GothamBold
+minBtn.TextSize = 16
+minBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+minBtn.ZIndex = 8
+Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 6)
+
+-- Close/destroy button (X)
 local closeBtn = Instance.new("TextButton", titleBar)
 closeBtn.Size = UDim2.new(0, 24, 0, 24)
 closeBtn.Position = UDim2.new(1, -30, 0.5, -12)
@@ -147,11 +203,7 @@ local function createTab(name)
 
     tabs[name] = btn
     tabContents[name] = scroll
-
-    btn.MouseButton1Click:Connect(function()
-        selectTab(name)
-    end)
-
+    btn.MouseButton1Click:Connect(function() selectTab(name) end)
     return scroll
 end
 
@@ -258,8 +310,6 @@ end
 -- ==================
 local mainTab = createTab("Main")
 
-local char = player.Character or player.CharacterAdded:Wait()
-
 makeLabel(mainTab, "player", 1)
 makeValue(mainTab, player.Name, 2)
 makeDivider(mainTab, 3)
@@ -273,7 +323,7 @@ makeLabel(mainTab, "account age (days)", 10)
 makeValue(mainTab, tostring(player.AccountAge), 11)
 makeDivider(mainTab, 12)
 makeLabel(mainTab, "character loaded at", 13)
-local charTimeLbl = makeValue(mainTab, os.date("%H:%M:%S"), 14)
+makeValue(mainTab, os.date("%H:%M:%S"), 14)
 makeDivider(mainTab, 15)
 makeLabel(mainTab, "team", 16)
 makeValue(mainTab, player.Team and player.Team.Name or "none", 17)
@@ -283,131 +333,161 @@ makeValue(mainTab, player.Team and player.Team.Name or "none", 17)
 -- ==================
 local deadlyTab = createTab("Deadly")
 
--- Delete all blocks
+-- Delete all blocks (uses getclosestcubes from ALL bricks folder like command line)
 local deleteRunning = false
 makeToggle(deadlyTab, "Delete all blocks", 1, function(state)
     deleteRunning = state
     if not state then return end
     task.spawn(function()
-        local char2 = player.Character or player.CharacterAdded:Wait()
-        local hrp = char2:WaitForChild("HumanoidRootPart")
-
-        local bricksFolder = workspace:WaitForChild("Bricks", 10)
-        if not bricksFolder then warn("No Bricks folder") return end
-
-        local playerBricks = bricksFolder:FindFirstChild(player.Name)
-        local attempts = 0
-        while not playerBricks and attempts < 20 do
-            task.wait(0.5)
-            playerBricks = bricksFolder:FindFirstChild(player.Name)
-            attempts = attempts + 1
-        end
-        if not playerBricks then warn("No bricks folder for player") return end
+        local char = player.Character or player.CharacterAdded:Wait()
+        local hrp = char:WaitForChild("HumanoidRootPart")
+        local dti = 0
 
         while deleteRunning do
-            local deleteTool = player.Backpack:FindFirstChild("Delete") or char2:FindFirstChild("Delete")
-            if not deleteTool then task.wait(0.5) continue end
+            local s, e = pcall(function()
+                local dtools = findbtools("Delete")
+                if #dtools == 0 then return end
 
-            if deleteTool.Parent ~= char2 then
-                deleteTool.Parent = char2
-                task.wait(0.15)
-            end
-
-            local ok, Event = pcall(function()
-                return char2.Delete.Script.Event
-            end)
-            if not ok then task.wait(0.5) continue end
-
-            local bricks = playerBricks:GetChildren()
-            if #bricks == 0 then task.wait(0.5) continue end
-
-            for _, v in bricks do
-                if not deleteRunning then break end
-                if v and v.Parent and v.Name == "Brick" then
-                    pcall(function()
-                        v.BrickColor = BrickColor.new("Really red")
-                        v.Material = Enum.Material.Neon
-                    end)
-                    task.wait(0.2)
-                    pcall(function()
-                        Event:FireServer(v, hrp.Position)
-                    end)
-                    task.wait(0.05)
+                -- getclosestcubes gets ALL bricks in the whole Bricks folder
+                local gcc = getclosestcubes(hrp.Position)
+                -- filter to only player's own bricks
+                local own = {}
+                local cfolder = workspace:FindFirstChild("Bricks")
+                local playerFolder = cfolder and cfolder:FindFirstChild(player.Name)
+                for _, v in gcc do
+                    if playerFolder and v[1]:IsDescendantOf(playerFolder) then
+                        table.insert(own, v)
+                    end
                 end
-            end
-            task.wait(0.2)
-        end
 
-        if char2:FindFirstChild("Delete") then
-            char2.Delete.Parent = player.Backpack
+                for _, v in own do
+                    if not deleteRunning then break end
+                    if v[1]:IsA("BasePart") and v[1].Parent then
+                        -- glow red
+                        pcall(function()
+                            v[1].BrickColor = BrickColor.new("Really red")
+                            v[1].Material = Enum.Material.Neon
+                        end)
+                        dtools = findbtools("Delete")
+                        if #dtools == 0 then break end
+                        dti = dti + 1
+                        local dt = dtools[(dti % #dtools) + 1]
+                        checktool(dt.bt)
+                        dt.e:FireServer(v[1], hrp.Position)
+                        task.wait(0.05)
+                    end
+                end
+            end)
+            if not s then warn(e) end
+            task.wait(0.1)
         end
     end)
 end)
 
 makeDivider(deadlyTab, 2)
 
--- Rainbow paint
-local paintColors = {
-    Color3.new(0.769, 0.157, 0.110),
-    Color3.new(0.294, 0.592, 0.294),
-    Color3.new(0.961, 0.804, 0.188),
-    Color3.new(0.706, 0.502, 1),
-    Color3.new(0.855, 0.522, 0.255),
-    Color3.new(0.016, 0.686, 0.925),
-}
-local paintIndex = 1
+-- Rainbow paint ground (uses rainbowterrain logic from command line)
 local paintRunning = false
-
 makeToggle(deadlyTab, "Rainbow paint ground", 3, function(state)
     paintRunning = state
     if not state then return end
     task.spawn(function()
-        local ok, paintEvent = pcall(function()
-            return player.Backpack.Paint.Script.Event
-        end)
-        if not ok then warn("No Paint event") return end
+        local pti = 0
+        local tparams = RaycastParams.new()
+        tparams.FilterType = Enum.RaycastFilterType.Include
+        tparams.FilterDescendantsInstances = {workspace.Terrain}
+        local hgy = 20
+
         while paintRunning do
-            if mouse.Target then
-                pcall(function()
-                    paintEvent:FireServer(
-                        mouse.Target,
-                        mouse.TargetSurface,
-                        mouse.Hit.Position,
-                        "both 🤝",
-                        paintColors[paintIndex],
-                        "smooth",
-                        ""
-                    )
-                end)
-                paintIndex = paintIndex % #paintColors + 1
-            end
-            task.wait(0.3)
+            local s, e = pcall(function()
+                local paints = findbtools("Paint")
+                if #paints == 0 then return end
+
+                local char = player.Character
+                if not char then return end
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                if not hrp then return end
+
+                local hx = hrp.Position.X
+                local hz = hrp.Position.Z
+
+                -- find ground height like command line does
+                local highestground = workspace:Raycast(Vector3.new(hx, 200, hz), Vector3.new(0, -300, 0), tparams)
+                if highestground then
+                    hgy = highestground.Position.Y
+                end
+
+                pti = pti + 1
+                local paint = paints[(pti % #paints) + 1]
+                checktool(paint.bt)
+                paint.e:FireServer(
+                    workspace.Terrain,
+                    Enum.NormalId.Top,
+                    Vector3.new(hx, math.clamp(hrp.Position.Y, hgy - 3.9, hgy), hz),
+                    "color",
+                    Color3.fromHSV((tick() / 5) % 1, 1, 1),
+                    "",
+                    ""
+                )
+            end)
+            if not s then warn(e) end
+            task.wait(0.15)
         end
     end)
 end)
 
 makeDivider(deadlyTab, 4)
 
--- Glitch blocks
+-- Glitch blocks (paint ALL player bricks pink/black cycling)
 local glitchRunning = false
 makeToggle(deadlyTab, "Glitch blocks (pink + black)", 5, function(state)
     glitchRunning = state
     if not state then return end
     task.spawn(function()
-        local bricksFolder = workspace:FindFirstChild("Bricks")
-        if not bricksFolder then return end
-        local playerBricks = bricksFolder:FindFirstChild(player.Name)
-        if not playerBricks then return end
+        local pti = 0
+        local glitchColors = {
+            Color3.fromRGB(255, 0, 127), -- hot pink
+            Color3.fromRGB(0, 0, 0),     -- black
+        }
         while glitchRunning do
-            for _, v in playerBricks:GetChildren() do
-                if not glitchRunning then break end
-                if v.Name == "Brick" then
-                    pcall(function()
-                        v.BrickColor = math.random(1,2)==1 and BrickColor.new("Hot pink") or BrickColor.new("Really black")
-                        v.Material = Enum.Material.Neon
-                    end)
+            local s, e = pcall(function()
+                local paints = findbtools("Paint")
+                if #paints == 0 then return end
+
+                local char = player.Character
+                if not char then return end
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                if not hrp then return end
+
+                local cfolder = workspace:FindFirstChild("Bricks")
+                local playerFolder = cfolder and cfolder:FindFirstChild(player.Name)
+                if not playerFolder then return end
+
+                local colorIndex = (math.floor(tick() * 5) % 2) + 1
+                local col = glitchColors[colorIndex]
+
+                for _, v in playerFolder:GetChildren() do
+                    if not glitchRunning then break end
+                    if v:IsA("BasePart") then
+                        pti = pti + 1
+                        local paint = paints[(pti % #paints) + 1]
+                        checktool(paint.bt)
+                        pcall(function()
+                            paint.e:FireServer(
+                                v,
+                                Enum.NormalId.Top,
+                                v.Position,
+                                "both 🤝",
+                                col,
+                                "smooth",
+                                ""
+                            )
+                        end)
+                        task.wait(0.02)
+                    end
                 end
-            end
+            end)
+            if not s then warn(e) end
             task.wait(0.1)
         end
     end)
@@ -488,28 +568,34 @@ local function openUI()
 end
 
 local function closeUI()
+    -- minimize: hide UI, show circle button
     isOpen = false
     TweenService:Create(blur, TweenInfo.new(0.2), {Size = 0}):Play()
-    task.delay(0.2, function() bg.Visible = false end)
+    task.delay(0.2, function()
+        bg.Visible = false
+        openBtn.Visible = true
+    end)
 end
 
-closeBtn.MouseButton1Click:Connect(function()
+-- Minimize (-)
+minBtn.MouseButton1Click:Connect(function()
     closeUI()
+end)
+
+-- Destroy (X) - destroys the whole UI
+closeBtn.MouseButton1Click:Connect(function()
+    TweenService:Create(blur, TweenInfo.new(0.2), {Size = 0}):Play()
     task.delay(0.2, function()
-        openBtn.Visible = true
+        screenGui:Destroy()
+        blur:Destroy()
     end)
 end)
 
 UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
     if input.KeyCode == Enum.KeyCode.RightShift then
-        if isOpen then
-            closeUI()
-            task.delay(0.2, function() openBtn.Visible = true end)
-        else
-            openUI()
-            openBtn.Visible = false
-        end
+        if isOpen then closeUI()
+        else openUI() openBtn.Visible = false end
     end
 end)
 
@@ -547,13 +633,13 @@ openBtn.Font = Enum.Font.GothamBold
 openBtn.TextSize = 18
 openBtn.TextColor3 = Color3.fromRGB(210, 210, 210)
 openBtn.ZIndex = 20
-openBtn.Visible = false
+openBtn.Visible = true
 Instance.new("UICorner", openBtn).CornerRadius = UDim.new(1, 0)
 local btnStroke = Instance.new("UIStroke", openBtn)
 btnStroke.Color = Color3.fromRGB(70, 70, 70)
 btnStroke.Thickness = 1.5
 
--- Drag circle button
+-- Draggable circle button
 local btnDragging = false
 local btnDragStart = nil
 local btnStartPos = nil
@@ -587,8 +673,5 @@ openBtn.MouseButton1Click:Connect(function()
     openUI()
     openBtn.Visible = false
 end)
-
--- Start closed, show circle button
-openBtn.Visible = true
 
 print("ManesHub loaded. Tap M or press RightShift to open.")
