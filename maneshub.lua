@@ -468,13 +468,12 @@ makeToggle(deadlyTab, "Glitch blocks (pink + black)", 5, function(state)
                 if not hrp then return end
 
                 local cfolder = workspace:FindFirstChild("Bricks")
-                local playerFolder = cfolder and cfolder:FindFirstChild(player.Name)
-                if not playerFolder then return end
+                if not cfolder then return end
 
                 local colorIndex = (math.floor(tick() * 5) % 2) + 1
                 local col = glitchColors[colorIndex]
 
-                for _, v in playerFolder:GetChildren() do
+                for _, v in cfolder:GetDescendants() do
                     if not glitchRunning then break end
                     if v:IsA("BasePart") then
                         pti = pti + 1
@@ -486,11 +485,11 @@ makeToggle(deadlyTab, "Glitch blocks (pink + black)", 5, function(state)
                                 v.Position,
                                 "both 🤝",
                                 col,
-                                "smooth",
+                                "neon",
                                 ""
                             )
                         end)
-                        task.wait(0.02)
+                        task.wait(0.01)
                     end
                 end
             end)
