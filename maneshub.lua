@@ -289,43 +289,58 @@ makeToggle(deadlyTab, "Delete all blocks", 1, function(state)
     deleteRunning = state
     if not state then return end
     task.spawn(function()
-        local char2 = player.Character
-        if not char2 then return end
-        local deleteTool = player.Backpack:FindFirstChild("Delete")
-        if not deleteTool then
-            warn("No Delete tool found")
-            return
-        end
-        deleteTool.Parent = char2
-        task.wait(0.2)
-        local ok, Event = pcall(function()
-            return char2.Delete.Script.Event
-        end)
-        if not ok then warn("Could not find Delete event") return end
-        local hrp = char2:FindFirstChild("HumanoidRootPart")
-        if not hrp then return end
-        local bricksFolder = workspace:FindFirstChild("Bricks")
+        local char2 = player.Character or player.CharacterAdded:Wait()
+        local hrp = char2:WaitForChild("HumanoidRootPart")
+
+        local bricksFolder = workspace:WaitForChild("Bricks", 10)
         if not bricksFolder then warn("No Bricks folder") return end
+
         local playerBricks = bricksFolder:FindFirstChild(player.Name)
-        if not playerBricks then warn("No bricks folder for player") return end
-        for _, v in playerBricks:GetChildren() do
-            if not deleteRunning then break end
-            if v.Name == "Brick" then
-                pcall(function()
-                    v.BrickColor = BrickColor.new("Really red")
-                    v.Material = Enum.Material.Neon
-                end)
-                task.wait(0.25)
-                pcall(function()
-                    Event:FireServer(v, hrp.Position)
-                end)
-                task.wait(0.1)
-            end
+        local attempts = 0
+        while not playerBricks and attempts < 20 do
+            task.wait(0.5)
+            playerBricks = bricksFolder:FindFirstChild(player.Name)
+            attempts = attempts + 1
         end
+        if not playerBricks then warn("No bricks folder for player") return end
+
+        while deleteRunning do
+            local deleteTool = player.Backpack:FindFirstChild("Delete") or char2:FindFirstChild("Delete")
+            if not deleteTool then task.wait(0.5) continue end
+
+            if deleteTool.Parent ~= char2 then
+                deleteTool.Parent = char2
+                task.wait(0.15)
+            end
+
+            local ok, Event = pcall(function()
+                return char2.Delete.Script.Event
+            end)
+            if not ok then task.wait(0.5) continue end
+
+            local bricks = playerBricks:GetChildren()
+            if #bricks == 0 then task.wait(0.5) continue end
+
+            for _, v in bricks do
+                if not deleteRunning then break end
+                if v and v.Parent and v.Name == "Brick" then
+                    pcall(function()
+                        v.BrickColor = BrickColor.new("Really red")
+                        v.Material = Enum.Material.Neon
+                    end)
+                    task.wait(0.2)
+                    pcall(function()
+                        Event:FireServer(v, hrp.Position)
+                    end)
+                    task.wait(0.05)
+                end
+            end
+            task.wait(0.2)
+        end
+
         if char2:FindFirstChild("Delete") then
             char2.Delete.Parent = player.Backpack
         end
-        deleteRunning = false
     end)
 end)
 
@@ -358,7 +373,7 @@ makeToggle(deadlyTab, "Rainbow paint ground", 3, function(state)
                         mouse.Target,
                         mouse.TargetSurface,
                         mouse.Hit.Position,
-                        "both",
+                        "both 🤝",
                         paintColors[paintIndex],
                         "smooth",
                         ""
@@ -480,14 +495,21 @@ end
 
 closeBtn.MouseButton1Click:Connect(function()
     closeUI()
-    openBtn.Visible = true
+    task.delay(0.2, function()
+        openBtn.Visible = true
+    end)
 end)
 
 UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
     if input.KeyCode == Enum.KeyCode.RightShift then
-        if isOpen then closeUI() openBtn.Visible = true
-        else openUI() openBtn.Visible = false end
+        if isOpen then
+            closeUI()
+            task.delay(0.2, function() openBtn.Visible = true end)
+        else
+            openUI()
+            openBtn.Visible = false
+        end
     end
 end)
 
