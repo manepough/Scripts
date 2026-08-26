@@ -40,13 +40,11 @@ local function findbtools(name)
     return btools
 end
 
--- getclosestcubes: gets all bricks from the Bricks folder sorted by distance
+-- getclosestcubes: gets all bricks anywhere in workspace sorted by distance
 local function getclosestcubes(pos)
     local cubes = {}
-    local cfolder = workspace:FindFirstChild("Bricks")
-    if not cfolder then return cubes end
-    for _, v in cfolder:GetDescendants() do
-        if v:IsA("BasePart") then
+    for _, v in workspace:GetDescendants() do
+        if v:IsA("BasePart") and v.Name == "Brick" then
             table.insert(cubes, {v, (v.Position - pos).Magnitude})
         end
     end
