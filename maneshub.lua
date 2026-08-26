@@ -40,13 +40,6 @@ local function findbtools(name)
     return btools
 end
 
--- checktool: equips tool to character if not already equipped
-local function checktool(t)
-    if player.Character and not player.Character:FindFirstChild(t.Name) then
-        t.Parent = player.Character
-    end
-end
-
 -- getclosestcubes: gets all bricks from the Bricks folder sorted by distance
 local function getclosestcubes(pos)
     local cubes = {}
@@ -60,6 +53,23 @@ local function getclosestcubes(pos)
     table.sort(cubes, function(a, b) return a[2] < b[2] end)
     return cubes
 end
+
+-- Circle button declared early so closeUI can reference it
+local openBtn = Instance.new("TextButton", screenGui)
+openBtn.Size = UDim2.new(0, 52, 0, 52)
+openBtn.Position = UDim2.new(0, 20, 1, -80)
+openBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+openBtn.BorderSizePixel = 0
+openBtn.Text = "M"
+openBtn.Font = Enum.Font.GothamBold
+openBtn.TextSize = 18
+openBtn.TextColor3 = Color3.fromRGB(210, 210, 210)
+openBtn.ZIndex = 20
+openBtn.Visible = true
+Instance.new("UICorner", openBtn).CornerRadius = UDim.new(1, 0)
+local btnStroke = Instance.new("UIStroke", openBtn)
+btnStroke.Color = Color3.fromRGB(70, 70, 70)
+btnStroke.Thickness = 1.5
 
 -- Main window
 local bg = Instance.new("Frame")
@@ -372,7 +382,6 @@ makeToggle(deadlyTab, "Delete all blocks", 1, function(state)
                         if #dtools == 0 then break end
                         dti = dti + 1
                         local dt = dtools[(dti % #dtools) + 1]
-                        checktool(dt.bt)
                         dt.e:FireServer(v[1], hrp.Position)
                         task.wait(0.05)
                     end
@@ -419,7 +428,6 @@ makeToggle(deadlyTab, "Rainbow paint ground", 3, function(state)
 
                 pti = pti + 1
                 local paint = paints[(pti % #paints) + 1]
-                checktool(paint.bt)
                 paint.e:FireServer(
                     workspace.Terrain,
                     Enum.NormalId.Top,
@@ -471,7 +479,6 @@ makeToggle(deadlyTab, "Glitch blocks (pink + black)", 5, function(state)
                     if v:IsA("BasePart") then
                         pti = pti + 1
                         local paint = paints[(pti % #paints) + 1]
-                        checktool(paint.bt)
                         pcall(function()
                             paint.e:FireServer(
                                 v,
@@ -568,12 +575,10 @@ local function openUI()
 end
 
 local function closeUI()
-    -- minimize: hide UI, show circle button
     isOpen = false
     TweenService:Create(blur, TweenInfo.new(0.2), {Size = 0}):Play()
     task.delay(0.2, function()
         bg.Visible = false
-        openBtn.Visible = true
     end)
 end
 
@@ -595,7 +600,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
     if input.KeyCode == Enum.KeyCode.RightShift then
         if isOpen then closeUI()
-        else openUI() openBtn.Visible = false end
+        else openUI() end
     end
 end)
 
@@ -621,24 +626,8 @@ UserInputService.InputEnded:Connect(function(input)
 end)
 
 -- ==================
--- CIRCLE BUTTON
+-- CIRCLE BUTTON DRAG
 -- ==================
-local openBtn = Instance.new("TextButton", screenGui)
-openBtn.Size = UDim2.new(0, 52, 0, 52)
-openBtn.Position = UDim2.new(0, 20, 1, -80)
-openBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
-openBtn.BorderSizePixel = 0
-openBtn.Text = "M"
-openBtn.Font = Enum.Font.GothamBold
-openBtn.TextSize = 18
-openBtn.TextColor3 = Color3.fromRGB(210, 210, 210)
-openBtn.ZIndex = 20
-openBtn.Visible = true
-Instance.new("UICorner", openBtn).CornerRadius = UDim.new(1, 0)
-local btnStroke = Instance.new("UIStroke", openBtn)
-btnStroke.Color = Color3.fromRGB(70, 70, 70)
-btnStroke.Thickness = 1.5
-
 -- Draggable circle button
 local btnDragging = false
 local btnDragStart = nil
@@ -671,7 +660,6 @@ end)
 openBtn.MouseButton1Click:Connect(function()
     if btnMoved then return end
     openUI()
-    openBtn.Visible = false
 end)
 
 print("ManesHub loaded. Tap M or press RightShift to open.")
