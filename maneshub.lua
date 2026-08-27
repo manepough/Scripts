@@ -299,7 +299,14 @@ local function makeToggle(parent, text, order, callback)
         end
         if callback then callback(state) end
     end)
-    return row
+
+    local function setOff()
+        state = false
+        TweenService:Create(bg2, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(38, 38, 38)}):Play()
+        TweenService:Create(knob, TweenInfo.new(0.15), {Position = UDim2.new(0, 3, 0.5, -5), BackgroundColor3 = Color3.fromRGB(110,110,110)}):Play()
+    end
+
+    return row, setOff
 end
 
 -- ==================
@@ -898,73 +905,233 @@ refreshSavesList()
 
 makeBuildDivider(buildTab, 9)
 
--- Auto build toggle
+-- Cross-server: load last build from any server
+makeBuildBtn(buildTab, "Load Last Build (Cross-Server)", 91, function()
+    local ok, data = pcall(function()
+        return jsonDecode(readfile(BUILDS_FOLDER .. "/_lastbuild.json"))
+    end)
+    if not ok or not data then
+        setStatus("no cross-server build found", true)
+        return
+    end
+    selectedBuild = data.data
+    selectedBuildName = data.name or "cross-server"
+    setStatus("loaded: " .. (data.name or "cross-server") .. " (" .. #selectedBuild .. " blocks)")
+end)
+
+-- Auto build - full command line approach
 local autoBuildRunning = false
-local autoBuildToggleRow = makeToggle(buildTab, "Auto Build (loads selected)", 10, function(state)
+local stopped = false
+local skipblock = false
+local childcube = nil
+local built = false
+local resizewait = 0.05
+
+-- Listen for newly placed blocks in player's folder
+local cubechild = nil
+local function setupBrickListener()
+    if cubechild then cubechild:Disconnect() end
+    local bfolder = workspace:FindFirstChild("Bricks") and workspace.Bricks:FindFirstChild(player.Name)
+    if bfolder then
+        cubechild = bfolder.ChildAdded:Connect(function(child)
+            childcube = child
+            built = true
+        end)
+    end
+end
+setupBrickListener()
+-- re-setup if character respawns
+player.CharacterAdded:Connect(function()
+    task.wait(1)
+    setupBrickListener()
+end)
+
+local function getEvent(toolName)
+    local bt = player.Backpack:FindFirstChild(toolName)
+    if bt and bt:FindFirstChild("Script") and bt.Script:FindFirstChild("Event") then
+        return bt.Script.Event
+    end
+    local ct = player.Character and player.Character:FindFirstChild(toolName)
+    if ct and ct:FindFirstChild("Script") and ct.Script:FindFirstChild("Event") then
+        return ct.Script.Event
+    end
+    return nil
+end
+
+-- Place one block and wait for it to appear, verify it's actually placed
+local function placeAndWait(buildEvent, pos, bsize)
+    built = false
+    childcube = nil
+    local c = 0
+    local args = {workspace.Terrain, Enum.NormalId.Top, pos, bsize or "normal"}
+    repeat
+        c = c + 1
+        pcall(function() buildEvent:FireServer(unpack(args)) end)
+        task.wait(0.08)
+    until (built and childcube) or stopped or skipblock or c > 30
+    return childcube
+end
+
+-- Paint a placed block with color and material
+local function paintBlock(paintEvent, block, color, matStr, origmat)
+    if not paintEvent or not block or not block.Parent then return end
+    local pos = block.Position + block.Size/2
+    local c = 0
+    -- color first
+    if color then
+        local args = {block, Enum.NormalId.Top, pos, "both 🤝", color, matStr or "smooth", ""}
+        repeat
+            c = c + 1
+            pcall(function() paintEvent:FireServer(unpack(args)) end)
+            task.wait(0.1)
+        until not block or not block.Parent or block.Color == color or stopped or skipblock or c > 30
+    end
+    -- material if different
+    if origmat and block and block.Parent and block.Material ~= Enum.Material[origmat] then
+        local args = {block, Enum.NormalId.Top, pos, "material", nil, matStr or "smooth", ""}
+        c = 0
+        repeat
+            c = c + 1
+            pcall(function() paintEvent:FireServer(unpack(args)) end)
+            task.wait(0.1)
+        until not block or not block.Parent or block.Material == Enum.Material[origmat] or stopped or skipblock or c > 30
+    end
+end
+
+-- Resize a block using Shape tool
+local function resizeBlock(shapeEvent, block, targetSize)
+    if not shapeEvent or not block or not block.Parent then return end
+    local axes = {
+        {Enum.NormalId.Right, "X"},
+        {Enum.NormalId.Top,   "Y"},
+        {Enum.NormalId.Back,  "Z"},
+    }
+    for _, axisData in ipairs(axes) do
+        local face, axis = axisData[1], axisData[2]
+        local target = targetSize[axis]
+        local c = 0
+        while block and block.Parent and block.Size[axis] ~= target and not stopped and not skipblock and c < target * 4 do
+            c = c + 1
+            local pos = block.Position + block.Size/2
+            local dir = block.Size[axis] > target and "decrease" or "increase"
+            pcall(function()
+                shapeEvent:FireServer(block, face, pos, dir)
+            end)
+            task.wait(resizewait)
+        end
+    end
+end
+
+-- Verify build and fill missing blocks
+local function verifyAndFill(buildEvent, paintEvent, shapeEvent, build, offset)
+    local bfolder = workspace:FindFirstChild("Bricks") and workspace.Bricks:FindFirstChild(player.Name)
+    if not bfolder then return end
+    local missing = 0
+    for _, v in ipairs(build) do
+        if stopped then break end
+        local pos = Vector3.new(v.p[1], v.p[2], v.p[3]) + (offset or Vector3.zero)
+        local found = false
+        for _, bl in bfolder:GetChildren() do
+            if bl:IsA("BasePart") and (bl.Position - pos).Magnitude < 3 then
+                found = true
+                break
+            end
+        end
+        if not found then
+            missing = missing + 1
+            skipblock = false
+            local placed = placeAndWait(buildEvent, pos, v.s and "detailed" or "normal")
+            if placed and paintEvent then
+                local col = v.c and Color3.fromRGB(v.c[1], v.c[2], v.c[3]) or nil
+                paintBlock(paintEvent, placed, col, v.m, v.o)
+            end
+            if placed and shapeEvent and v.s then
+                resizeBlock(shapeEvent, placed, Vector3.new(v.s[1], v.s[2], v.s[3]))
+            end
+        end
+    end
+    return missing
+end
+
+local autoBuildSetOff = nil
+local _, autoBuildSetOffRef = makeToggle(buildTab, "Auto Build (loads selected)", 10, function(state)
     autoBuildRunning = state
     stopped = not state
+    skipblock = false
     if not state then return end
     if not selectedBuild then setStatus("select a save first", true) return end
     task.spawn(function()
         local build = selectedBuild
-        local buildEvent = nil
-        -- get event from backpack directly
-        local bt = player.Backpack:FindFirstChild("Build")
-        if bt and bt:FindFirstChild("Script") and bt.Script:FindFirstChild("Event") then
-            buildEvent = bt.Script.Event
-        end
-        if not buildEvent then
-            local ct = player.Character and player.Character:FindFirstChild("Build")
-            if ct and ct:FindFirstChild("Script") and ct.Script:FindFirstChild("Event") then
-                buildEvent = ct.Script.Event
-            end
-        end
-        if not buildEvent then setStatus("no Build tool found", true) return end
+        local buildName = selectedBuildName
 
-        local paintEvent = nil
-        local pt = player.Backpack:FindFirstChild("Paint")
-        if pt and pt:FindFirstChild("Script") and pt.Script:FindFirstChild("Event") then
-            paintEvent = pt.Script.Event
-        end
+        -- Cross-server: write current build to a shared file so other servers can load it
+        pcall(function()
+            writefile(BUILDS_FOLDER .. "/_lastbuild.json", jsonEncode({
+                name = buildName,
+                data = build
+            }))
+        end)
+
+        local buildEvent = getEvent("Build")
+        local paintEvent = getEvent("Paint")
+        local shapeEvent = getEvent("Shape")
+
+        if not buildEvent then setStatus("no Build tool found", true) autoBuildRunning = false if autoBuildSetOff then autoBuildSetOff() end return end
 
         local total = #build
+        setStatus("building " .. total .. " blocks...")
+
+        -- Pass 1: place all blocks
         for i, v in ipairs(build) do
             if not autoBuildRunning or stopped then break end
+            skipblock = false
             local pos = Vector3.new(v.p[1], v.p[2], v.p[3])
-            -- place block instantly using terrain as base
-            pcall(function()
-                buildEvent:FireServer(workspace.Terrain, Enum.NormalId.Top, pos, "normal")
-            end)
-            -- paint color if needed
-            if paintEvent and v.c then
-                local col = Color3.fromRGB(v.c[1], v.c[2], v.c[3])
-                task.wait(0.05)
-                -- find the placed block
-                local placed = nil
-                local bfolder = workspace.Bricks:FindFirstChild(player.Name)
-                if bfolder then
-                    for _, bl in bfolder:GetChildren() do
-                        if bl:IsA("BasePart") and (bl.Position - pos).Magnitude < 3 then
-                            placed = bl
-                            break
-                        end
-                    end
-                end
-                if placed then
-                    pcall(function()
-                        paintEvent:FireServer(placed, Enum.NormalId.Top, placed.Position, "color", col, v.m or "smooth", "")
-                    end)
-                end
+            local bsize = v.s and "detailed" or "normal"
+
+            -- refresh events each block in case tools moved
+            buildEvent = getEvent("Build") or buildEvent
+            paintEvent = getEvent("Paint") or paintEvent
+            shapeEvent = getEvent("Shape") or shapeEvent
+
+            local placed = placeAndWait(buildEvent, pos, bsize)
+
+            if placed and paintEvent then
+                local col = v.c and Color3.fromRGB(v.c[1], v.c[2], v.c[3]) or nil
+                paintBlock(paintEvent, placed, col, v.m, v.o)
             end
+
+            if placed and shapeEvent and v.s then
+                resizeBlock(shapeEvent, placed, Vector3.new(v.s[1], v.s[2], v.s[3]))
+            end
+
             setStatus("building " .. i .. "/" .. total)
-            task.wait(0.05)
         end
-        if not stopped then
+
+        if stopped then
+            setStatus("build stopped")
+            autoBuildRunning = false
+            if autoBuildSetOff then autoBuildSetOff() end
+            return
+        end
+
+        -- Pass 2: verify and fill missing blocks
+        setStatus("verifying build...")
+        task.wait(0.5)
+        buildEvent = getEvent("Build") or buildEvent
+        paintEvent = getEvent("Paint") or paintEvent
+        shapeEvent = getEvent("Shape") or shapeEvent
+        local missing = verifyAndFill(buildEvent, paintEvent, shapeEvent, build, Vector3.zero)
+
+        if missing and missing > 0 then
+            setStatus("fixed " .. missing .. " missing! done")
+        else
             setStatus("build complete! " .. total .. " blocks")
         end
         autoBuildRunning = false
+        if autoBuildSetOff then autoBuildSetOff() end
     end)
 end)
+autoBuildSetOff = autoBuildSetOffRef
 
 -- Stop build button
 makeBuildBtn(buildTab, "Stop Build", 11, function()
