@@ -41,18 +41,6 @@ local function findbtools(name)
     return btools
 end
 
--- getclosestcubes: gets all bricks anywhere in workspace sorted by distance
-local function getclosestcubes(pos)
-    local cubes = {}
-    for _, v in workspace:GetDescendants() do
-        if v:IsA("BasePart") and v.Name == "Brick" then
-            table.insert(cubes, {v, (v.Position - pos).Magnitude})
-        end
-    end
-    table.sort(cubes, function(a, b) return a[2] < b[2] end)
-    return cubes
-end
-
 -- Circle button declared early so closeUI can reference it
 local openBtn = Instance.new("TextButton", screenGui)
 openBtn.Size = UDim2.new(0, 52, 0, 52)
@@ -342,7 +330,7 @@ makeValue(mainTab, player.Team and player.Team.Name or "none", 17)
 -- ==================
 local deadlyTab = createTab("Deadly")
 
--- Delete all blocks (uses getclosestcubes from ALL bricks folder like command line)
+-- Delete all blocks - optimized, no red coloring, batch fire
 local deleteRunning = false
 makeToggle(deadlyTab, "Delete all blocks", 1, function(state)
     deleteRunning = state
@@ -350,34 +338,33 @@ makeToggle(deadlyTab, "Delete all blocks", 1, function(state)
     task.spawn(function()
         local char = player.Character or player.CharacterAdded:Wait()
         local hrp = char:WaitForChild("HumanoidRootPart")
-        local dti = 0
 
         while deleteRunning do
-            local s, e = pcall(function()
-                local dtools = findbtools("Delete")
-                if #dtools == 0 then return end
+            local dtools = findbtools("Delete")
+            if #dtools == 0 then task.wait(0.5) continue end
 
-                -- getclosestcubes gets ALL bricks in the whole Bricks folder
-                local gcc = getclosestcubes(hrp.Position)
+            local dt = dtools[1]
 
-                for _, v in gcc do
-                    if not deleteRunning then break end
-                    if v[1]:IsA("BasePart") and v[1].Parent then
-                        -- glow red
-                        pcall(function()
-                            v[1].BrickColor = BrickColor.new("Really red")
-                            v[1].Material = Enum.Material.Neon
-                        end)
-                        dtools = findbtools("Delete")
-                        if #dtools == 0 then break end
-                        dti = dti + 1
-                        local dt = dtools[(dti % #dtools) + 1]
-                        dt.e:FireServer(v[1], hrp.Position)
-                        task.wait(0.05)
-                    end
+            -- collect all bricks at once
+            local bricks = {}
+            for _, v in workspace:GetDescendants() do
+                if v:IsA("BasePart") and v.Name == "Brick" and v.Parent then
+                    table.insert(bricks, v)
                 end
-            end)
-            if not s then warn(e) end
+            end
+
+            if #bricks == 0 then task.wait(0.3) continue end
+
+            for _, v in bricks do
+                if not deleteRunning then break end
+                if v and v.Parent then
+                    pcall(function()
+                        dt.e:FireServer(v, hrp.Position)
+                    end)
+                    task.wait(0.03)
+                end
+            end
+
             task.wait(0.1)
         end
     end)
@@ -385,7 +372,7 @@ end)
 
 makeDivider(deadlyTab, 2)
 
--- Rainbow paint ground (uses rainbowterrain logic from command line)
+-- Rainbow paint ground
 local paintRunning = false
 makeToggle(deadlyTab, "Rainbow paint ground", 3, function(state)
     paintRunning = state
@@ -410,11 +397,8 @@ makeToggle(deadlyTab, "Rainbow paint ground", 3, function(state)
                 local hx = hrp.Position.X
                 local hz = hrp.Position.Z
 
-                -- find ground height like command line does
                 local highestground = workspace:Raycast(Vector3.new(hx, 200, hz), Vector3.new(0, -300, 0), tparams)
-                if highestground then
-                    hgy = highestground.Position.Y
-                end
+                if highestground then hgy = highestground.Position.Y end
 
                 pti = pti + 1
                 local paint = paints[(pti % #paints) + 1]
@@ -436,54 +420,177 @@ end)
 
 makeDivider(deadlyTab, 4)
 
--- Glitch blocks (paint ALL player bricks pink/black cycling)
+-- Glitch blocks with color picker
 local glitchRunning = false
-makeToggle(deadlyTab, "Glitch blocks (pink + black)", 5, function(state)
+local glitchColor1 = Color3.fromRGB(255, 0, 127)
+local glitchColor2 = Color3.fromRGB(0, 0, 0)
+
+-- Color picker row
+local colorRow = Instance.new("Frame", deadlyTab)
+colorRow.Size = UDim2.new(1, 0, 0, 32)
+colorRow.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+colorRow.BorderSizePixel = 0
+colorRow.LayoutOrder = 5
+colorRow.ZIndex = 7
+Instance.new("UICorner", colorRow).CornerRadius = UDim.new(0, 7)
+local colorStroke = Instance.new("UIStroke", colorRow)
+colorStroke.Color = Color3.fromRGB(40, 40, 40)
+colorStroke.Thickness = 1
+
+local colorLbl = Instance.new("TextLabel", colorRow)
+colorLbl.Size = UDim2.new(0.4, 0, 1, 0)
+colorLbl.Position = UDim2.new(0, 10, 0, 0)
+colorLbl.BackgroundTransparency = 1
+colorLbl.Font = Enum.Font.Gotham
+colorLbl.TextSize = 10
+colorLbl.TextColor3 = Color3.fromRGB(150, 150, 150)
+colorLbl.Text = "glitch colors"
+colorLbl.TextXAlignment = Enum.TextXAlignment.Left
+colorLbl.ZIndex = 8
+
+-- Color 1 swatch
+local swatch1 = Instance.new("TextButton", colorRow)
+swatch1.Size = UDim2.new(0, 22, 0, 22)
+swatch1.Position = UDim2.new(1, -56, 0.5, -11)
+swatch1.BackgroundColor3 = glitchColor1
+swatch1.BorderSizePixel = 0
+swatch1.Text = ""
+swatch1.ZIndex = 8
+Instance.new("UICorner", swatch1).CornerRadius = UDim.new(0, 5)
+
+-- Color 2 swatch
+local swatch2 = Instance.new("TextButton", colorRow)
+swatch2.Size = UDim2.new(0, 22, 0, 22)
+swatch2.Position = UDim2.new(1, -30, 0.5, -11)
+swatch2.BackgroundColor3 = glitchColor2
+swatch2.BorderSizePixel = 0
+swatch2.Text = ""
+swatch2.ZIndex = 8
+Instance.new("UICorner", swatch2).CornerRadius = UDim.new(0, 5)
+local swatch2Stroke = Instance.new("UIStroke", swatch2)
+swatch2Stroke.Color = Color3.fromRGB(80, 80, 80)
+swatch2Stroke.Thickness = 1
+
+-- Preset colors for picker
+local presets = {
+    Color3.fromRGB(255,0,127),   -- hot pink
+    Color3.fromRGB(0,0,0),       -- black
+    Color3.fromRGB(255,255,255), -- white
+    Color3.fromRGB(255,0,0),     -- red
+    Color3.fromRGB(0,255,0),     -- green
+    Color3.fromRGB(0,0,255),     -- blue
+    Color3.fromRGB(255,165,0),   -- orange
+    Color3.fromRGB(128,0,255),   -- purple
+    Color3.fromRGB(0,255,255),   -- cyan
+    Color3.fromRGB(255,255,0),   -- yellow
+}
+
+-- Color picker popup
+local pickerPopup = Instance.new("Frame", screenGui)
+pickerPopup.Size = UDim2.new(0, 220, 0, 60)
+pickerPopup.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+pickerPopup.BorderSizePixel = 0
+pickerPopup.Visible = false
+pickerPopup.ZIndex = 30
+Instance.new("UICorner", pickerPopup).CornerRadius = UDim.new(0, 8)
+local ppStroke = Instance.new("UIStroke", pickerPopup)
+ppStroke.Color = Color3.fromRGB(60, 60, 60)
+ppStroke.Thickness = 1
+
+local ppGrid = Instance.new("Frame", pickerPopup)
+ppGrid.Size = UDim2.new(1, -10, 1, -10)
+ppGrid.Position = UDim2.new(0, 5, 0, 5)
+ppGrid.BackgroundTransparency = 1
+ppGrid.ZIndex = 31
+
+local ppLayout = Instance.new("UIGridLayout", ppGrid)
+ppLayout.CellSize = UDim2.new(0, 18, 0, 18)
+ppLayout.CellPadding = UDim2.new(0, 3, 0, 3)
+ppLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local activeSwatch = nil
+
+for i, col in presets do
+    local dot = Instance.new("TextButton", ppGrid)
+    dot.Size = UDim2.new(0, 18, 0, 18)
+    dot.BackgroundColor3 = col
+    dot.BorderSizePixel = 0
+    dot.Text = ""
+    dot.ZIndex = 32
+    dot.LayoutOrder = i
+    Instance.new("UICorner", dot).CornerRadius = UDim.new(0, 4)
+    dot.MouseButton1Click:Connect(function()
+        if activeSwatch == 1 then
+            glitchColor1 = col
+            swatch1.BackgroundColor3 = col
+        else
+            glitchColor2 = col
+            swatch2.BackgroundColor3 = col
+        end
+        pickerPopup.Visible = false
+    end)
+end
+
+local function showPicker(swatchNum, btn)
+    activeSwatch = swatchNum
+    local absPos = btn.AbsolutePosition
+    pickerPopup.Position = UDim2.new(0, absPos.X - 180, 0, absPos.Y - 70)
+    pickerPopup.Visible = true
+end
+
+swatch1.MouseButton1Click:Connect(function() showPicker(1, swatch1) end)
+swatch2.MouseButton1Click:Connect(function() showPicker(2, swatch2) end)
+
+-- Close picker if clicking elsewhere
+UserInputService.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        pickerPopup.Visible = false
+    end
+end)
+
+-- Glitch toggle
+makeToggle(deadlyTab, "Glitch blocks", 6, function(state)
     glitchRunning = state
     if not state then return end
     task.spawn(function()
-        local pti = 0
-        local glitchColors = {
-            Color3.fromRGB(255, 0, 127), -- hot pink
-            Color3.fromRGB(0, 0, 0),     -- black
-        }
+        local paints = findbtools("Paint")
+
         while glitchRunning do
-            local s, e = pcall(function()
-                local paints = findbtools("Paint")
-                if #paints == 0 then return end
+            -- refresh paint tools each loop
+            paints = findbtools("Paint")
+            if #paints == 0 then task.wait(0.3) continue end
 
-                local char = player.Character
-                if not char then return end
-                local hrp = char:FindFirstChild("HumanoidRootPart")
-                if not hrp then return end
+            local cfolder = workspace:FindFirstChild("Bricks")
+            if not cfolder then task.wait(0.3) continue end
 
-                local cfolder = workspace:FindFirstChild("Bricks")
-                if not cfolder then return end
-
-                local colorIndex = (math.floor(tick() * 5) % 2) + 1
-                local col = glitchColors[colorIndex]
-
-                for _, v in cfolder:GetDescendants() do
-                    if not glitchRunning then break end
-                    if v:IsA("BasePart") then
-                        pti = pti + 1
-                        local paint = paints[(pti % #paints) + 1]
-                        pcall(function()
-                            paint.e:FireServer(
-                                v,
-                                Enum.NormalId.Top,
-                                v.Position,
-                                "both 🤝",
-                                col,
-                                "neon",
-                                ""
-                            )
-                        end)
-                        task.wait(0.01)
-                    end
+            -- collect all bricks once per loop
+            local bricks = {}
+            for _, v in cfolder:GetDescendants() do
+                if v:IsA("BasePart") then
+                    table.insert(bricks, v)
                 end
-            end)
-            if not s then warn(e) end
+            end
+
+            local colorIndex = (math.floor(tick() * 10) % 2) + 1
+            local col = colorIndex == 1 and glitchColor1 or glitchColor2
+
+            local pt = paints[1]
+            for _, v in bricks do
+                if not glitchRunning then break end
+                if v and v.Parent then
+                    pcall(function()
+                        pt.e:FireServer(
+                            v,
+                            Enum.NormalId.Top,
+                            v.Position,
+                            "both 🤝",
+                            col,
+                            "neon",
+                            ""
+                        )
+                    end)
+                end
+            end
             task.wait(0.1)
         end
     end)
@@ -494,41 +601,405 @@ end)
 -- ==================
 local buildTab = createTab("Build")
 
-makeLabel(buildTab, "decal tool", 1)
+-- Materials map (same as Extra Stuff)
+local materials = {}
+materials[Enum.Material.SmoothPlastic] = "smooth"
+materials[Enum.Material.Plastic] = "plastic"
+materials[Enum.Material.Neon] = "neon"
+materials[Enum.Material.Brick] = "bricks"
+materials[Enum.Material.WoodPlanks] = "planks"
+materials[Enum.Material.Ice] = "ice"
+materials[Enum.Material.Grass] = "grass"
+materials[Enum.Material.Sand] = "sand"
+materials[Enum.Material.Snow] = "snow"
+materials[Enum.Material.Glass] = "glass"
+materials[Enum.Material.Wood] = "wood"
+materials[Enum.Material.Slate] = "stone"
+materials[Enum.Material.Metal] = "metal"
+materials[Enum.Material.Concrete] = "concrete"
+materials[Enum.Material.DiamondPlate] = "steel"
+materials[Enum.Material.SmoothPlastic] = "smooth"
+local swappedmaterials = {}
+for i, v in pairs(materials) do swappedmaterials[v] = i end
 
-local getDecalBtn = Instance.new("TextButton", buildTab)
-getDecalBtn.Size = UDim2.new(1, 0, 0, 34)
-getDecalBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 28)
-getDecalBtn.BorderSizePixel = 0
-getDecalBtn.Font = Enum.Font.GothamBold
-getDecalBtn.TextSize = 12
-getDecalBtn.TextColor3 = Color3.fromRGB(210, 210, 210)
-getDecalBtn.Text = "Get Decal Tool"
-getDecalBtn.LayoutOrder = 2
-getDecalBtn.ZIndex = 7
-Instance.new("UICorner", getDecalBtn).CornerRadius = UDim.new(0, 7)
-local getDecalStroke = Instance.new("UIStroke", getDecalBtn)
-getDecalStroke.Color = Color3.fromRGB(50, 50, 50)
-getDecalStroke.Thickness = 1
+local BUILDS_FOLDER = "ManesHubBuilds"
+local stopped = false
+local buildingExec = nil
+local selectedBuild = nil
+local selectedBuildName = nil
 
-local decalStatusLbl = makeLabel(buildTab, "", 3)
-decalStatusLbl.TextColor3 = Color3.fromRGB(80, 200, 120)
+-- ensure folder exists
+pcall(function()
+    if not isfolder(BUILDS_FOLDER) then makefolder(BUILDS_FOLDER) end
+end)
 
-getDecalBtn.MouseButton1Click:Connect(function()
-    -- Check if already have it
-    if player.Backpack:FindFirstChild("Decal Tool") or (player.Character and player.Character:FindFirstChild("Decal Tool")) then
-        decalStatusLbl.Text = "already in inventory!"
-        decalStatusLbl.TextColor3 = Color3.fromRGB(180, 180, 60)
+-- JSON helpers
+local http = game:GetService("HttpService")
+
+local function jsonEncode(t)
+    return http:JSONEncode(t)
+end
+local function jsonDecode(s)
+    return http:JSONDecode(s)
+end
+
+-- list saves
+local function listSaves()
+    local files = {}
+    pcall(function()
+        for _, v in listfiles(BUILDS_FOLDER) do
+            local name = v:gsub(BUILDS_FOLDER .. "/", ""):gsub(BUILDS_FOLDER .. "\\", ""):gsub(".json", "")
+            if name ~= "" then table.insert(files, name) end
+        end
+    end)
+    return files
+end
+
+-- fire build event without holding tool
+local function fireBuild(pos, size)
+    local buildEvent = player.Backpack:FindFirstChild("Build")
+    if buildEvent then
+        buildEvent = buildEvent:FindFirstChild("Script") and buildEvent.Script:FindFirstChild("Event") and buildEvent.Script.Event
+    end
+    if not buildEvent then
+        -- try from character
+        local ct = player.Character and player.Character:FindFirstChild("Build")
+        if ct and ct:FindFirstChild("Script") and ct.Script:FindFirstChild("Event") then
+            buildEvent = ct.Script.Event
+        end
+    end
+    if buildEvent then
+        pcall(function()
+            buildEvent:FireServer(
+                workspace.Terrain,
+                Enum.NormalId.Top,
+                pos,
+                "normal"
+            )
+        end)
+    end
+end
+
+-- save a single block's data
+local function saveBlock(bl)
+    if not bl:IsA("BasePart") then return nil end
+    local bd = {}
+    bd.p = {bl.Position.X, bl.Position.Y, bl.Position.Z}
+    bd.c = {math.round(bl.Color.R*255), math.round(bl.Color.G*255), math.round(bl.Color.B*255)}
+    bd.m = materials[bl.Material] or "smooth"
+    bd.o = bl.Material.Name
+    bd.a = bl.Anchored
+    bd.cc = bl.CanCollide
+    if bl.Size.X ~= 4 or bl.Size.Y ~= 4 or bl.Size.Z ~= 4 then
+        bd.s = {bl.Size.X, bl.Size.Y, bl.Size.Z}
+    end
+    return bd
+end
+
+-- Widget helpers (reuse from above)
+local function makeBuildLabel(parent, text, order)
+    local l = Instance.new("TextLabel", parent)
+    l.Size = UDim2.new(1, 0, 0, 14)
+    l.BackgroundTransparency = 1
+    l.Font = Enum.Font.Gotham
+    l.TextSize = 10
+    l.TextColor3 = Color3.fromRGB(90, 90, 90)
+    l.Text = text
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.LayoutOrder = order or 0
+    l.ZIndex = 7
+    return l
+end
+
+local function makeBuildBtn(parent, text, order, callback)
+    local btn = Instance.new("TextButton", parent)
+    btn.Size = UDim2.new(1, 0, 0, 30)
+    btn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    btn.BorderSizePixel = 0
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 11
+    btn.TextColor3 = Color3.fromRGB(200, 200, 200)
+    btn.Text = text
+    btn.LayoutOrder = order or 0
+    btn.ZIndex = 7
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 7)
+    local s = Instance.new("UIStroke", btn)
+    s.Color = Color3.fromRGB(45, 45, 45)
+    s.Thickness = 1
+    btn.MouseButton1Click:Connect(callback)
+    return btn
+end
+
+local function makeBuildDivider(parent, order)
+    local d = Instance.new("Frame", parent)
+    d.Size = UDim2.new(1, 0, 0, 1)
+    d.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+    d.BorderSizePixel = 0
+    d.LayoutOrder = order or 0
+    d.ZIndex = 7
+    return d
+end
+
+-- Status label
+local buildStatus = makeBuildLabel(buildTab, "", 0)
+buildStatus.TextColor3 = Color3.fromRGB(80, 200, 120)
+buildStatus.LayoutOrder = 0
+
+local function setStatus(msg, isErr)
+    buildStatus.Text = msg
+    buildStatus.TextColor3 = isErr and Color3.fromRGB(220, 80, 80) or Color3.fromRGB(80, 200, 120)
+end
+
+-- Build name input
+makeBuildLabel(buildTab, "build name", 1)
+local nameInput = Instance.new("TextBox", buildTab)
+nameInput.Size = UDim2.new(1, 0, 0, 28)
+nameInput.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+nameInput.BorderSizePixel = 0
+nameInput.Font = Enum.Font.Code
+nameInput.TextSize = 11
+nameInput.TextColor3 = Color3.fromRGB(200, 200, 200)
+nameInput.PlaceholderText = "enter build name..."
+nameInput.PlaceholderColor3 = Color3.fromRGB(65, 65, 65)
+nameInput.Text = "MyBuild"
+nameInput.LayoutOrder = 2
+nameInput.ClearTextOnFocus = false
+nameInput.ZIndex = 7
+Instance.new("UICorner", nameInput).CornerRadius = UDim.new(0, 7)
+local nPad = Instance.new("UIPadding", nameInput)
+nPad.PaddingLeft = UDim.new(0, 8)
+
+makeBuildDivider(buildTab, 3)
+
+-- Save my build
+makeBuildBtn(buildTab, "Save My Build", 4, function()
+    local name = nameInput.Text
+    if name == "" then setStatus("enter a name first", true) return end
+    local playerFolder = workspace:FindFirstChild("Bricks") and workspace.Bricks:FindFirstChild(player.Name)
+    if not playerFolder then setStatus("no blocks found", true) return end
+    local builddata = {}
+    for _, v in playerFolder:GetChildren() do
+        if v:IsA("BasePart") then
+            local bd = saveBlock(v)
+            if bd then table.insert(builddata, bd) end
+        end
+    end
+    if #builddata == 0 then setStatus("no blocks to save", true) return end
+    pcall(function()
+        writefile(BUILDS_FOLDER .. "/" .. name .. ".json", jsonEncode(builddata))
+    end)
+    setStatus("saved " .. #builddata .. " blocks as '" .. name .. "'")
+    -- refresh dropdown
+    refreshSavesList()
+end)
+
+-- Save server builds
+makeBuildBtn(buildTab, "Save Server Builds", 5, function()
+    local name = nameInput.Text
+    if name == "" then setStatus("enter a name first", true) return end
+    local builddata = {}
+    for _, v in workspace:GetDescendants() do
+        if v:IsA("BasePart") and v.Name == "Brick" then
+            local bd = saveBlock(v)
+            if bd then table.insert(builddata, bd) end
+        end
+    end
+    if #builddata == 0 then setStatus("no blocks found", true) return end
+    pcall(function()
+        writefile(BUILDS_FOLDER .. "/" .. name .. ".json", jsonEncode(builddata))
+    end)
+    setStatus("saved " .. #builddata .. " blocks as '" .. name .. "'")
+    refreshSavesList()
+end)
+
+makeBuildDivider(buildTab, 6)
+
+-- Saved builds list label
+makeBuildLabel(buildTab, "saved builds", 7)
+
+-- Saves dropdown (scrollable list of buttons)
+local savesFrame = Instance.new("Frame", buildTab)
+savesFrame.Size = UDim2.new(1, 0, 0, 80)
+savesFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+savesFrame.BorderSizePixel = 0
+savesFrame.LayoutOrder = 8
+savesFrame.ZIndex = 7
+Instance.new("UICorner", savesFrame).CornerRadius = UDim.new(0, 7)
+
+local savesScroll = Instance.new("ScrollingFrame", savesFrame)
+savesScroll.Size = UDim2.new(1, 0, 1, 0)
+savesScroll.BackgroundTransparency = 1
+savesScroll.BorderSizePixel = 0
+savesScroll.ScrollBarThickness = 2
+savesScroll.ScrollBarImageColor3 = Color3.fromRGB(60, 60, 60)
+savesScroll.ZIndex = 8
+local savesLayout = Instance.new("UIListLayout", savesScroll)
+savesLayout.Padding = UDim.new(0, 2)
+local savesPad = Instance.new("UIPadding", savesScroll)
+savesPad.PaddingLeft = UDim.new(0, 4)
+savesPad.PaddingRight = UDim.new(0, 4)
+savesPad.PaddingTop = UDim.new(0, 4)
+savesLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    savesScroll.CanvasSize = UDim2.new(0, 0, 0, savesLayout.AbsoluteContentSize.Y + 8)
+end)
+
+local selectedSaveBtn = nil
+
+function refreshSavesList()
+    for _, c in savesScroll:GetChildren() do
+        if c:IsA("TextButton") then c:Destroy() end
+    end
+    local saves = listSaves()
+    if #saves == 0 then
+        local empty = Instance.new("TextLabel", savesScroll)
+        empty.Size = UDim2.new(1, 0, 0, 20)
+        empty.BackgroundTransparency = 1
+        empty.Font = Enum.Font.Gotham
+        empty.TextSize = 10
+        empty.TextColor3 = Color3.fromRGB(70, 70, 70)
+        empty.Text = "no saves yet"
+        empty.ZIndex = 9
         return
     end
+    for _, name in saves do
+        local btn = Instance.new("TextButton", savesScroll)
+        btn.Size = UDim2.new(1, 0, 0, 22)
+        btn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+        btn.BorderSizePixel = 0
+        btn.Font = Enum.Font.Gotham
+        btn.TextSize = 11
+        btn.TextColor3 = Color3.fromRGB(170, 170, 170)
+        btn.Text = name
+        btn.ZIndex = 9
+        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+        btn.MouseButton1Click:Connect(function()
+            if selectedSaveBtn then
+                selectedSaveBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+                selectedSaveBtn.TextColor3 = Color3.fromRGB(170, 170, 170)
+            end
+            selectedSaveBtn = btn
+            btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+            btn.TextColor3 = Color3.fromRGB(220, 220, 220)
+            selectedBuildName = name
+            local ok, data = pcall(function()
+                return jsonDecode(readfile(BUILDS_FOLDER .. "/" .. name .. ".json"))
+            end)
+            if ok then
+                selectedBuild = data
+                setStatus("selected: " .. name .. " (" .. #data .. " blocks)")
+            else
+                setStatus("failed to load " .. name, true)
+            end
+        end)
+    end
+end
 
-    decalStatusLbl.Text = "creating tool..."
-    decalStatusLbl.TextColor3 = Color3.fromRGB(180, 180, 60)
+refreshSavesList()
 
+makeBuildDivider(buildTab, 9)
+
+-- Auto build toggle
+local autoBuildRunning = false
+local autoBuildToggleRow = makeToggle(buildTab, "Auto Build (loads selected)", 10, function(state)
+    autoBuildRunning = state
+    stopped = not state
+    if not state then return end
+    if not selectedBuild then setStatus("select a save first", true) return end
+    task.spawn(function()
+        local build = selectedBuild
+        local buildEvent = nil
+        -- get event from backpack directly
+        local bt = player.Backpack:FindFirstChild("Build")
+        if bt and bt:FindFirstChild("Script") and bt.Script:FindFirstChild("Event") then
+            buildEvent = bt.Script.Event
+        end
+        if not buildEvent then
+            local ct = player.Character and player.Character:FindFirstChild("Build")
+            if ct and ct:FindFirstChild("Script") and ct.Script:FindFirstChild("Event") then
+                buildEvent = ct.Script.Event
+            end
+        end
+        if not buildEvent then setStatus("no Build tool found", true) return end
+
+        local paintEvent = nil
+        local pt = player.Backpack:FindFirstChild("Paint")
+        if pt and pt:FindFirstChild("Script") and pt.Script:FindFirstChild("Event") then
+            paintEvent = pt.Script.Event
+        end
+
+        local total = #build
+        for i, v in ipairs(build) do
+            if not autoBuildRunning or stopped then break end
+            local pos = Vector3.new(v.p[1], v.p[2], v.p[3])
+            -- place block instantly using terrain as base
+            pcall(function()
+                buildEvent:FireServer(workspace.Terrain, Enum.NormalId.Top, pos, "normal")
+            end)
+            -- paint color if needed
+            if paintEvent and v.c then
+                local col = Color3.fromRGB(v.c[1], v.c[2], v.c[3])
+                task.wait(0.05)
+                -- find the placed block
+                local placed = nil
+                local bfolder = workspace.Bricks:FindFirstChild(player.Name)
+                if bfolder then
+                    for _, bl in bfolder:GetChildren() do
+                        if bl:IsA("BasePart") and (bl.Position - pos).Magnitude < 3 then
+                            placed = bl
+                            break
+                        end
+                    end
+                end
+                if placed then
+                    pcall(function()
+                        paintEvent:FireServer(placed, Enum.NormalId.Top, placed.Position, "color", col, v.m or "smooth", "")
+                    end)
+                end
+            end
+            setStatus("building " .. i .. "/" .. total)
+            task.wait(0.05)
+        end
+        if not stopped then
+            setStatus("build complete! " .. total .. " blocks")
+        end
+        autoBuildRunning = false
+    end)
+end)
+
+-- Stop build button
+makeBuildBtn(buildTab, "Stop Build", 11, function()
+    autoBuildRunning = false
+    stopped = true
+    setStatus("build stopped")
+end)
+
+makeBuildDivider(buildTab, 12)
+
+-- Delete save
+makeBuildBtn(buildTab, "Delete Selected Save", 13, function()
+    if not selectedBuildName then setStatus("select a save first", true) return end
+    pcall(function()
+        delfile(BUILDS_FOLDER .. "/" .. selectedBuildName .. ".json")
+    end)
+    setStatus("deleted: " .. selectedBuildName)
+    selectedBuild = nil
+    selectedBuildName = nil
+    selectedSaveBtn = nil
+    refreshSavesList()
+end)
+
+makeBuildDivider(buildTab, 14)
+
+-- Get Decal Tool
+makeBuildLabel(buildTab, "decal tool", 15)
+local getDecalBtn = makeBuildBtn(buildTab, "Get Decal Tool", 16, function()
+    if player.Backpack:FindFirstChild("Decal Tool") or (player.Character and player.Character:FindFirstChild("Decal Tool")) then
+        setStatus("already in inventory!")
+        return
+    end
     local dectool = Instance.new("Tool")
     dectool.Name = "Decal Tool"
     dectool.RequiresHandle = true
-
     local handle = Instance.new("Part")
     handle.Size = Vector3.one * 1.001
     handle.Shape = Enum.PartType.Cylinder
@@ -536,16 +1007,8 @@ getDecalBtn.MouseButton1Click:Connect(function()
     handle.Name = "Handle"
     handle.Color = Color3.fromRGB(0, 255, 255)
     handle.Parent = dectool
-
-    -- Give to inventory
     dectool.Parent = player.Backpack
-
-    decalStatusLbl.Text = "decal tool added to inventory!"
-    decalStatusLbl.TextColor3 = Color3.fromRGB(80, 200, 120)
-
-    task.delay(2, function()
-        decalStatusLbl.Text = ""
-    end)
+    setStatus("decal tool added to inventory!")
 end)
 
 -- ==================
