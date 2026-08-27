@@ -105,11 +105,12 @@ end
 local function saveBlock(bl)
     if not bl:IsA("BasePart") then return nil end
     local bd = {}
-    bd.p = {bl.Position.X, bl.Position.Y, bl.Position.Z}
-    bd.c = {math.round(bl.Color.R*255), math.round(bl.Color.G*255), math.round(bl.Color.B*255)}
-    bd.m = materials[bl.Material] or "smooth"
-    bd.o = bl.Material.Name
-    bd.a = bl.Anchored
+    bd.a  = bl.Anchored
+    bd.p  = {bl.Position.X, bl.Position.Y, bl.Position.Z}
+    bd.c  = {math.round(bl.Color.R*255), math.round(bl.Color.G*255), math.round(bl.Color.B*255)}
+    bd.m  = materials[bl.Material] or "smooth"
+    bd.sp = {} -- sprays (empty for now)
+    bd.o  = bl.Material.Name
     bd.cc = bl.CanCollide
     if bl.Size.X ~= 4 or bl.Size.Y ~= 4 or bl.Size.Z ~= 4 then
         bd.s = {bl.Size.X, bl.Size.Y, bl.Size.Z}
@@ -181,12 +182,12 @@ local function placeAndWait(buildEvent, pos, bsize)
     repeat
         c = c + 1
         pcall(function() buildEvent:FireServer(table.unpack(args)) end)
-        task.wait(0.08)
-        -- if something is blocking, delete it and retry
-        if c == 5 then
+        task.wait(0.05)
+        -- if something is blocking after 3 tries, delete it and retry
+        if c == 3 then
             deleteBlockingBrick(pos)
         end
-    until (built and childcube and childcube.Parent) or stopped or skipblock or c > 50
+    until (built and childcube and childcube.Parent) or stopped or skipblock or c > 40
     if oldprt then pcall(function() oldprt:Destroy() end) oldprt = nil end
     return childcube
 end
@@ -194,16 +195,34 @@ end
 -- paint block with color + material
 local function paintBlock(paintEvent, block, color, matStr, origmat)
     if not paintEvent or not block or not block.Parent then return end
+    if not color then return end
+
+    -- wait for block to fully exist
+    task.wait(0.05)
+    if not block or not block.Parent then return end
+
     local pos = block.Position + block.Size/2
-    if color then
-        local args = {block, Enum.NormalId.Top, pos, "both 🤝", color, matStr or "smooth", ""}
-        local c = 0
-        repeat
-            c = c + 1
-            pcall(function() paintEvent:FireServer(table.unpack(args)) end)
-            task.wait(0.08)
-        until not block or not block.Parent or block.Color == color or stopped or skipblock or c > 40
-    end
+    local targetColor = color
+    local c = 0
+
+    -- paint color + material together
+    local args = {block, Enum.NormalId.Top, pos, "both 🤝", targetColor, matStr or "smooth", ""}
+    repeat
+        c = c + 1
+        pcall(function() paintEvent:FireServer(table.unpack(args)) end)
+        task.wait(0.06)
+        if block and block.Parent then
+            pos = block.Position + block.Size/2
+            args[3] = pos
+        end
+    until not block
+        or not block.Parent
+        or (math.abs(block.Color.R - targetColor.R) < 0.01
+            and math.abs(block.Color.G - targetColor.G) < 0.01
+            and math.abs(block.Color.B - targetColor.B) < 0.01)
+        or stopped
+        or skipblock
+        or c > 30
 end
 
 -- resize block using Shape tool
@@ -235,7 +254,12 @@ local function verifyAndFill(buildEvent, paintEvent, shapeEvent, build)
     local missing = 0
     for _, v in ipairs(build) do
         if stopped then break end
-        local pos = Vector3.new(v.p[1], v.p[2], v.p[3])
+        local posArr = v.p or v.pos
+        local colArr = v.c or v.color
+        local matStr = v.m or v.mat or "smooth"
+        local origmat = v.o or v.origmat
+        local sizeArr = v.s or v.size
+        local pos = Vector3.new(posArr[1], posArr[2], posArr[3])
         local found = false
         for _, bl in bfolder:GetChildren() do
             if bl:IsA("BasePart") and (bl.Position - pos).Magnitude < 3 then
@@ -249,12 +273,14 @@ local function verifyAndFill(buildEvent, paintEvent, shapeEvent, build)
             buildEvent = getEvent("Build") or buildEvent
             paintEvent = getEvent("Paint") or paintEvent
             shapeEvent = getEvent("Shape") or shapeEvent
-            local placed = placeAndWait(buildEvent, pos, v.s)
-            if placed and paintEvent and v.c then
-                paintBlock(paintEvent, placed, Color3.fromRGB(v.c[1],v.c[2],v.c[3]), v.m, v.o)
+            deleteBlockingBrick(pos)
+            task.wait(0.04)
+            local placed = placeAndWait(buildEvent, pos, sizeArr)
+            if placed and paintEvent and colArr then
+                paintBlock(paintEvent, placed, Color3.fromRGB(colArr[1],colArr[2],colArr[3]), matStr, origmat)
             end
-            if placed and shapeEvent and v.s then
-                resizeBlock(shapeEvent, placed, Vector3.new(v.s[1],v.s[2],v.s[3]))
+            if placed and shapeEvent and sizeArr then
+                resizeBlock(shapeEvent, placed, Vector3.new(sizeArr[1],sizeArr[2],sizeArr[3]))
             end
         end
     end
@@ -1098,20 +1124,29 @@ local _, autoBuildSetOffFn = makeToggle(buildTab, "Auto Build (loads selected)",
             paintEvent = getEvent("Paint") or paintEvent
             shapeEvent = getEvent("Shape") or shapeEvent
 
-            local pos = Vector3.new(v.p[1], v.p[2], v.p[3])
+            -- support both old format (pos/color/mat) and new format (p/c/m)
+            local posArr = v.p or v.pos
+            local colArr = v.c or v.color
+            local matStr = v.m or v.mat or "smooth"
+            local origmat = v.o or v.origmat
+            local sizeArr = v.s or v.size
+
+            local pos = Vector3.new(posArr[1], posArr[2], posArr[3])
+            local col = colArr and Color3.fromRGB(colArr[1], colArr[2], colArr[3]) or nil
 
             -- delete anything blocking this spot first
             deleteBlockingBrick(pos)
-            task.wait(0.05)
+            task.wait(0.04)
 
-            local placed = placeAndWait(buildEvent, pos, v.s)
+            local placed = placeAndWait(buildEvent, pos, sizeArr)
 
-            if placed and paintEvent and v.c then
-                paintBlock(paintEvent, placed, Color3.fromRGB(v.c[1],v.c[2],v.c[3]), v.m, v.o)
+            -- paint immediately after placement confirmed
+            if placed and paintEvent and col then
+                paintBlock(paintEvent, placed, col, matStr, origmat)
             end
 
-            if placed and shapeEvent and v.s then
-                resizeBlock(shapeEvent, placed, Vector3.new(v.s[1],v.s[2],v.s[3]))
+            if placed and shapeEvent and sizeArr then
+                resizeBlock(shapeEvent, placed, Vector3.new(sizeArr[1], sizeArr[2], sizeArr[3]))
             end
 
             setStatus("building "..i.."/"..total)
