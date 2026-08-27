@@ -22,7 +22,7 @@ blur.Parent = game.Lighting
 
 -- === HELPERS ===
 
--- findbtools: finds tool from backpack OR character (same logic as command line)
+-- findbtools: gets event directly from backpack, no equipping needed
 local function findbtools(name)
     local btools = {}
     for _, v in player.Backpack:GetChildren() do
@@ -30,6 +30,7 @@ local function findbtools(name)
             table.insert(btools, {bt = v, e = v.Script.Event})
         end
     end
+    -- also check character in case it's already equipped
     if player.Character then
         for _, v in player.Character:GetChildren() do
             if v:IsA("Tool") and v.Name == name and v:FindFirstChild("Script") and v.Script:FindFirstChild("Event") then
@@ -493,61 +494,58 @@ end)
 -- ==================
 local buildTab = createTab("Build")
 
-makeLabel(buildTab, "memeify decal id", 1)
+makeLabel(buildTab, "decal tool", 1)
 
-local decalInput = Instance.new("TextBox", buildTab)
-decalInput.Size = UDim2.new(1, 0, 0, 30)
-decalInput.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
-decalInput.BorderSizePixel = 0
-decalInput.Font = Enum.Font.Code
-decalInput.TextSize = 11
-decalInput.TextColor3 = Color3.fromRGB(200, 200, 200)
-decalInput.PlaceholderText = "enter decal id..."
-decalInput.PlaceholderColor3 = Color3.fromRGB(65, 65, 65)
-decalInput.Text = "11894923077"
-decalInput.LayoutOrder = 2
-decalInput.ClearTextOnFocus = false
-decalInput.ZIndex = 7
-Instance.new("UICorner", decalInput).CornerRadius = UDim.new(0, 7)
-local dPad = Instance.new("UIPadding", decalInput)
-dPad.PaddingLeft = UDim.new(0, 8)
+local getDecalBtn = Instance.new("TextButton", buildTab)
+getDecalBtn.Size = UDim2.new(1, 0, 0, 34)
+getDecalBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 28)
+getDecalBtn.BorderSizePixel = 0
+getDecalBtn.Font = Enum.Font.GothamBold
+getDecalBtn.TextSize = 12
+getDecalBtn.TextColor3 = Color3.fromRGB(210, 210, 210)
+getDecalBtn.Text = "Get Decal Tool"
+getDecalBtn.LayoutOrder = 2
+getDecalBtn.ZIndex = 7
+Instance.new("UICorner", getDecalBtn).CornerRadius = UDim.new(0, 7)
+local getDecalStroke = Instance.new("UIStroke", getDecalBtn)
+getDecalStroke.Color = Color3.fromRGB(50, 50, 50)
+getDecalStroke.Thickness = 1
 
-makeDivider(buildTab, 3)
+local decalStatusLbl = makeLabel(buildTab, "", 3)
+decalStatusLbl.TextColor3 = Color3.fromRGB(80, 200, 120)
 
-local applyBtn = Instance.new("TextButton", buildTab)
-applyBtn.Size = UDim2.new(1, 0, 0, 30)
-applyBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 28)
-applyBtn.BorderSizePixel = 0
-applyBtn.Font = Enum.Font.GothamBold
-applyBtn.TextSize = 11
-applyBtn.TextColor3 = Color3.fromRGB(210, 210, 210)
-applyBtn.Text = "Apply memeify decal"
-applyBtn.LayoutOrder = 4
-applyBtn.ZIndex = 7
-Instance.new("UICorner", applyBtn).CornerRadius = UDim.new(0, 7)
-local applyStroke = Instance.new("UIStroke", applyBtn)
-applyStroke.Color = Color3.fromRGB(50, 50, 50)
-applyStroke.Thickness = 1
-
-local statusLbl = makeLabel(buildTab, "", 5)
-statusLbl.TextColor3 = Color3.fromRGB(80, 200, 120)
-
-applyBtn.MouseButton1Click:Connect(function()
-    local id = decalInput.Text:gsub("%D+", "")
-    if id == "" then
-        statusLbl.Text = "enter a valid id"
-        statusLbl.TextColor3 = Color3.fromRGB(200, 80, 80)
+getDecalBtn.MouseButton1Click:Connect(function()
+    -- Check if already have it
+    if player.Backpack:FindFirstChild("Decal Tool") or (player.Character and player.Character:FindFirstChild("Decal Tool")) then
+        decalStatusLbl.Text = "already in inventory!"
+        decalStatusLbl.TextColor3 = Color3.fromRGB(180, 180, 60)
         return
     end
-    statusLbl.Text = "sending..."
-    statusLbl.TextColor3 = Color3.fromRGB(180, 180, 60)
-    pcall(function()
-        local chatEvent = game:GetService("ReplicatedStorage").DefaultChatSystemChatEvents.SayMessageRequest
-        chatEvent:FireServer(";memeify " .. id, "All")
+
+    decalStatusLbl.Text = "creating tool..."
+    decalStatusLbl.TextColor3 = Color3.fromRGB(180, 180, 60)
+
+    local dectool = Instance.new("Tool")
+    dectool.Name = "Decal Tool"
+    dectool.RequiresHandle = true
+
+    local handle = Instance.new("Part")
+    handle.Size = Vector3.one * 1.001
+    handle.Shape = Enum.PartType.Cylinder
+    handle.CanCollide = false
+    handle.Name = "Handle"
+    handle.Color = Color3.fromRGB(0, 255, 255)
+    handle.Parent = dectool
+
+    -- Give to inventory
+    dectool.Parent = player.Backpack
+
+    decalStatusLbl.Text = "decal tool added to inventory!"
+    decalStatusLbl.TextColor3 = Color3.fromRGB(80, 200, 120)
+
+    task.delay(2, function()
+        decalStatusLbl.Text = ""
     end)
-    task.wait(0.4)
-    statusLbl.Text = "sent: " .. id
-    statusLbl.TextColor3 = Color3.fromRGB(80, 200, 120)
 end)
 
 -- ==================
