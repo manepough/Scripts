@@ -278,7 +278,7 @@ local function buildblock(pos, texture, color, bsize, bsizev3, origmaterial, spr
                 c = c + 1
                 ev = getBuildEvent()
                 if ev then pcall(function() ev:FireServer(table.unpack(args)) end) end
-                if c == 3 then deleteBlockingBrick(pos) end
+                
                 task.wait(0.1)
             until (built == true and childcube) or stopped == true or skipblock == true or c > 200
             built = false
