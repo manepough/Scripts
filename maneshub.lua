@@ -125,7 +125,7 @@ local stopped     = false
 local skipblock   = false
 local childcube   = nil
 local built       = false
-local resizewait  = 0.4
+local resizewait  = 0.7
 local oldprt      = nil
 local cubechild   = nil
 local cubehistory = {}
@@ -181,16 +181,34 @@ local function buildblock(pos, texture, color, bsize, bsizev3, origmaterial, spr
     local needsresize = false
 
     local s, e = pcall(function()
-        -- equip build tool like Extra Stuff does
-        if player.Backpack:FindFirstChild("Build") then
-            player.Backpack.Build.Parent = player.Character
+        -- get events directly from backpack, no equipping needed
+        local function getBuildEvent()
+            local bt = player.Backpack:FindFirstChild("Build")
+            if bt and bt:FindFirstChild("Script") and bt.Script:FindFirstChild("Event") then return bt.Script.Event end
+            local ct = player.Character and player.Character:FindFirstChild("Build")
+            if ct and ct:FindFirstChild("Script") and ct.Script:FindFirstChild("Event") then return ct.Script.Event end
+            return nil
+        end
+        local function getPaintEvent()
+            local bt = player.Backpack:FindFirstChild("Paint")
+            if bt and bt:FindFirstChild("Script") and bt.Script:FindFirstChild("Event") then return bt.Script.Event end
+            local ct = player.Character and player.Character:FindFirstChild("Paint")
+            if ct and ct:FindFirstChild("Script") and ct.Script:FindFirstChild("Event") then return ct.Script.Event end
+            return nil
+        end
+        local function getShapeEvent()
+            local bt = player.Backpack:FindFirstChild("Shape")
+            if bt and bt:FindFirstChild("Script") and bt.Script:FindFirstChild("Event") then return bt.Script.Event end
+            local ct = player.Character and player.Character:FindFirstChild("Shape")
+            if ct and ct:FindFirstChild("Script") and ct.Script:FindFirstChild("Event") then return ct.Script.Event end
+            return nil
         end
 
         local oo = false
         local c = 0
         childcube = nil
 
-        -- try to build from existing adjacent block (Extra Stuff optimization)
+        -- adjacency detection from cubehistory
         if #cubehistory > 0 and oldprt then
             local allooslol = {}
             for i, childcube2 in pairs(cubehistory) do
@@ -207,7 +225,7 @@ local function buildblock(pos, texture, color, bsize, bsizev3, origmaterial, spr
                     end
                 end
             end
-            if #allooslol > 1 and color and oo[2].Color ~= color then
+            if #allooslol > 1 and color and oo[2] and oo[2].Color ~= color then
                 for _, v in pairs(allooslol) do
                     if v[2].Color == color then oo = v end
                 end
@@ -220,11 +238,8 @@ local function buildblock(pos, texture, color, bsize, bsizev3, origmaterial, spr
                 c = 0
                 repeat
                     c = c + 1
-                    if player.Character:FindFirstChild("Build") then
-                        pcall(function() player.Character.Build.Script.Event:FireServer(table.unpack(args)) end)
-                    else
-                        pcall(function() player.Backpack.Build.Parent = player.Character end)
-                    end
+                    local ev = getBuildEvent()
+                    if ev then pcall(function() ev:FireServer(table.unpack(args)) end) end
                     task.wait(0.05)
                 until (built == true and childcube) or oo[2] == nil or oo[2].Parent == nil or stopped == true or skipblock == true or c > 200
                 if oo[2] == nil or oo[2].Parent == nil or c > 200 then
@@ -237,7 +252,6 @@ local function buildblock(pos, texture, color, bsize, bsizev3, origmaterial, spr
         end
 
         if oo == false then
-            -- determine bsize
             if bsize == nil then
                 bsize = "normal"
                 if bsizev3 ~= nil and (bsizev3.X ~= mult or bsizev3.Y ~= mult or bsizev3.Z ~= mult) then
@@ -248,31 +262,22 @@ local function buildblock(pos, texture, color, bsize, bsizev3, origmaterial, spr
                 if bsizev3 == nil and bsize ~= "detailed" and oldprt and oldprt.Position ~= pos then
                     bsize = "detailed"
                     needsresize = true
-                    bsizev3 = Vector3.new(4, 4, 4)
-                    pos = Vector3.new((pos.X - (bsizev3.X/2)) + 0.5, (pos.Y - (bsizev3.Y/2)) + 0.5, (pos.Z - (bsizev3.Z/2)) + 0.5)
+                    bsizev3 = Vector3.new(4,4,4)
+                    pos = Vector3.new((pos.X-(bsizev3.X/2))+0.5, (pos.Y-(bsizev3.Y/2))+0.5, (pos.Z-(bsizev3.Z/2))+0.5)
                 end
             end
 
             local args = {workspace.Terrain, Enum.NormalId.Top, pos, bsize or "normal"}
             built = false
 
-            -- first fire
-            pcall(function()
-                if player.Character:FindFirstChild("Build") then
-                    player.Character.Build.Script.Event:FireServer(table.unpack(args))
-                end
-            end)
+            local ev = getBuildEvent()
+            if ev then pcall(function() ev:FireServer(table.unpack(args)) end) end
 
             c = 0
             repeat
                 c = c + 1
-                if player.Character and not player.Character:FindFirstChild("Build") and player.Backpack:FindFirstChild("Build") then
-                    player.Backpack.Build.Parent = player.Character
-                end
-                if player.Character:FindFirstChild("Build") then
-                    pcall(function() player.Character.Build.Script.Event:FireServer(table.unpack(args)) end)
-                end
-                -- delete blocking on attempt 3
+                ev = getBuildEvent()
+                if ev then pcall(function() ev:FireServer(table.unpack(args)) end) end
                 if c == 3 then deleteBlockingBrick(pos) end
                 task.wait(0.1)
             until (built == true and childcube) or stopped == true or skipblock == true or c > 200
@@ -280,65 +285,46 @@ local function buildblock(pos, texture, color, bsize, bsizev3, origmaterial, spr
             c = 0
         end
 
-        -- PAINT color + material (exact Extra Stuff method)
-        if childcube and typeof(color) == "Color3" and (localplr_backpackHasPaint() or localplr_charHasPaint()) then
-            local paintpos = (childcube and childcube.Position + childcube.Size/2) or pos
-            local args = {
-                childcube,
-                Enum.NormalId.Top,
-                paintpos,
-                "color",
-                color or nil,
-                "tiles",
-                ""
-            }
-            task.wait()
-            pcall(function()
-                if player.Backpack:FindFirstChild("Paint") then
-                    player.Backpack.Paint.Parent = player.Character
-                end
-            end)
-            if texture ~= nil then
-                if color == nil then
-                    args[4] = "material"
-                else
-                    args[4] = "both 🤝"
-                end
-                args[6] = texture
-            end
-            if not childcube then
-                if oldprt then oldprt:Destroy() end
-                return
-            end
-            c = 0
-            pcall(function()
+        -- PAINT: fire directly from backpack, no equip
+        if childcube and typeof(color) == "Color3" then
+            local paintev = getPaintEvent()
+            if paintev then
+                local paintpos = childcube.Position + childcube.Size/2
+                local args = {
+                    childcube,
+                    Enum.NormalId.Top,
+                    paintpos,
+                    texture ~= nil and (color ~= nil and "both 🤝" or "material") or "color",
+                    color or nil,
+                    texture or "tiles",
+                    ""
+                }
+                task.wait(0.05)
+                c = 0
                 repeat
                     c = c + 1
-                    if player.Character and not player.Character:FindFirstChild("Paint") and player.Backpack:FindFirstChild("Paint") then
-                        player.Backpack.Paint.Parent = player.Character
-                    end
-                    if player.Character and player.Character:FindFirstChild("Paint") then
-                        pcall(function() player.Character.Paint.Script.Event:FireServer(table.unpack(args)) end)
+                    paintev = getPaintEvent()
+                    if paintev and childcube and childcube.Parent then
+                        paintpos = childcube.Position + childcube.Size/2
+                        args[3] = paintpos
+                        pcall(function() paintev:FireServer(table.unpack(args)) end)
                     end
                     task.wait(0.2)
                 until not childcube or not childcube.Parent
                     or childcube.Color == color
                     or (texture and childcube.Material == Enum.Material[origmaterial or "SmoothPlastic"])
                     or stopped == true or skipblock == true or c > 2000
-            end)
+            end
         end
 
-        -- RESIZE using Shape tool (exact Extra Stuff method)
+        -- RESIZE: fire shape directly from backpack, no equip, 0.7s wait per step
         if childcube and bsizev3 ~= nil and (bsizev3.X ~= mult or bsizev3.Y ~= mult or bsizev3.Z ~= mult) then
-            if not player.Character:FindFirstChild("Shape") and player.Backpack:FindFirstChild("Shape") then
-                player.Backpack.Shape.Parent = player.Character
-            end
-            local args = {childcube, Enum.NormalId.Right, "", ""}
             local axes = {
                 {Enum.NormalId.Right, "X"},
                 {Enum.NormalId.Top,   "Y"},
                 {Enum.NormalId.Back,  "Z"},
             }
+            local args = {childcube, Enum.NormalId.Right, "", ""}
             for _, axdata in ipairs(axes) do
                 args[2] = axdata[1]
                 local axis = axdata[2]
@@ -346,18 +332,12 @@ local function buildblock(pos, texture, color, bsize, bsizev3, origmaterial, spr
                 if childcube and childcube.Size[axis] ~= bsizev3[axis] then
                     repeat
                         c = c + 1
-                        local rpos = (childcube and childcube.Position + childcube.Size/2) or pos
-                        args[3] = rpos
-                        args[4] = nil
-                        if childcube then
-                            if childcube.Size[axis] > bsizev3[axis] then args[4] = "decrease"
-                            elseif childcube.Size[axis] < bsizev3[axis] then args[4] = "increase" end
-                        end
-                        if not player.Character:FindFirstChild("Shape") and player.Backpack:FindFirstChild("Shape") then
-                            player.Backpack.Shape.Parent = player.Character
-                        end
-                        if player.Character:FindFirstChild("Shape") then
-                            pcall(function() player.Character.Shape.Script.Event:FireServer(table.unpack(args)) end)
+                        local shapeev = getShapeEvent()
+                        if shapeev and childcube and childcube.Parent then
+                            local rpos = childcube.Position + childcube.Size/2
+                            args[3] = rpos
+                            args[4] = childcube.Size[axis] > bsizev3[axis] and "decrease" or "increase"
+                            pcall(function() shapeev:FireServer(table.unpack(args)) end)
                         end
                         task.wait(resizewait)
                     until args[4] == nil
@@ -377,7 +357,6 @@ local function buildblock(pos, texture, color, bsize, bsizev3, origmaterial, spr
     novel = false
 end
 
--- helpers to check paint tool availability
 function localplr_backpackHasPaint()
     return player.Backpack:FindFirstChild("Paint") ~= nil
 end
