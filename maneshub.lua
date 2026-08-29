@@ -993,21 +993,18 @@ player.CharacterAdded:Connect(function()
     setupBrickListener()
 end)
 
--- Equip tool and get its event (moves from Backpack to Character)
-local function getEquippedEvent(toolName)
-    local bt = player.Backpack:FindFirstChild(toolName)
-    if bt then
-        pcall(function() bt.Parent = player.Character end)
-        task.wait(0.05)
+-- Get tool's event directly from Backpack — no equip, no Parent reassignment.
+-- Falls back to Character only if the tool genuinely isn't in Backpack (e.g. it's
+-- already equipped from a prior session), so this still works either way without
+-- ever moving anything itself.
+local function getBackpackEvent(toolName)
+    local bp = player.Backpack:FindFirstChild(toolName)
+    if bp and bp:FindFirstChild("Script") and bp.Script:FindFirstChild("Event") then
+        return bp.Script.Event
     end
     local ct = player.Character and player.Character:FindFirstChild(toolName)
     if ct and ct:FindFirstChild("Script") and ct.Script:FindFirstChild("Event") then
         return ct.Script.Event
-    end
-    -- fallback: try backpack event directly
-    local bp = player.Backpack:FindFirstChild(toolName)
-    if bp and bp:FindFirstChild("Script") and bp.Script:FindFirstChild("Event") then
-        return bp.Script.Event
     end
     return nil
 end
@@ -1018,7 +1015,7 @@ local function placeBlock(pos, bsize)
     childcube = nil
     local c = 0
 
-    local buildEvent = getEquippedEvent("Build")
+    local buildEvent = getBackpackEvent("Build")
     if not buildEvent then return nil end
 
     local args = {workspace.Terrain, Enum.NormalId.Top, pos, bsize or "normal"}
@@ -1028,10 +1025,8 @@ local function placeBlock(pos, bsize)
 
     repeat
         c = c + 1
-        -- keep tool equipped
-        if player.Character and not player.Character:FindFirstChild("Build") then
-            buildEvent = getEquippedEvent("Build")
-        end
+        -- refetch each pass in case the tool reference goes stale
+        buildEvent = getBackpackEvent("Build") or buildEvent
         if buildEvent then
             pcall(function() buildEvent:FireServer(unpack(args)) end)
         end
@@ -1042,13 +1037,13 @@ local function placeBlock(pos, bsize)
     return childcube
 end
 
--- Paint block: equip Paint, fire, wait for color/material to match
+-- Paint block: fire directly from Backpack, no equip. Waits for color/material to match.
 local function paintBlock(block, color, matStr, origmat)
     if not block or not block.Parent then return end
     local c = 0
     local pos = block.Position + block.Size / 2
 
-    local paintEvent = getEquippedEvent("Paint")
+    local paintEvent = getBackpackEvent("Paint")
     if not paintEvent then return end
 
     if color then
@@ -1056,9 +1051,7 @@ local function paintBlock(block, color, matStr, origmat)
         c = 0
         repeat
             c = c + 1
-            if player.Character and not player.Character:FindFirstChild("Paint") then
-                paintEvent = getEquippedEvent("Paint")
-            end
+            paintEvent = getBackpackEvent("Paint") or paintEvent
             if paintEvent and block and block.Parent then
                 pcall(function() paintEvent:FireServer(unpack(args)) end)
             end
@@ -1072,9 +1065,7 @@ local function paintBlock(block, color, matStr, origmat)
         c = 0
         repeat
             c = c + 1
-            if player.Character and not player.Character:FindFirstChild("Paint") then
-                paintEvent = getEquippedEvent("Paint")
-            end
+            paintEvent = getBackpackEvent("Paint") or paintEvent
             if paintEvent and block and block.Parent then
                 pcall(function() paintEvent:FireServer(unpack(args)) end)
             end
@@ -1083,11 +1074,11 @@ local function paintBlock(block, color, matStr, origmat)
     end
 end
 
--- Resize block: equip Shape, teleport, fire per axis, same as Extra Stuff
+-- Resize block: fire Shape event directly from Backpack, per axis, no equip/teleport.
 local function resizeBlock(block, targetSize)
     if not block or not block.Parent then return end
 
-    local shapeEvent = getEquippedEvent("Shape")
+    local shapeEvent = getBackpackEvent("Shape")
     if not shapeEvent then return end
 
     local axes = {
@@ -1105,9 +1096,7 @@ local function resizeBlock(block, targetSize)
             c = c + 1
             local dir = block.Size[axis] > target and "decrease" or "increase"
 
-            if player.Character and not player.Character:FindFirstChild("Shape") then
-                shapeEvent = getEquippedEvent("Shape")
-            end
+            shapeEvent = getBackpackEvent("Shape") or shapeEvent
 
             if shapeEvent then
                 pcall(function()
