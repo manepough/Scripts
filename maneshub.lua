@@ -1012,17 +1012,7 @@ local function getEquippedEvent(toolName)
     return nil
 end
 
--- Teleport character near position (same as Extra Stuff's tp)
-local function tpToBlock(pos)
-    pcall(function()
-        local char = player.Character
-        if char and char:FindFirstChild("HumanoidRootPart") then
-            char.HumanoidRootPart.CFrame = CFrame.new(pos + Vector3.new(0, 6, 0))
-        end
-    end)
-end
-
--- Place one block: equip Build, teleport near, fire, wait for ChildAdded
+-- Place one block: equip Build, fire, wait for ChildAdded
 local function placeBlock(pos, bsize)
     built = false
     childcube = nil
@@ -1035,7 +1025,6 @@ local function placeBlock(pos, bsize)
 
     -- fire once before loop
     pcall(function() buildEvent:FireServer(unpack(args)) end)
-    tpToBlock(pos)
 
     repeat
         c = c + 1
@@ -1046,7 +1035,6 @@ local function placeBlock(pos, bsize)
         if buildEvent then
             pcall(function() buildEvent:FireServer(unpack(args)) end)
         end
-        tpToBlock(pos)
         task.wait(0.1)
     until (built and childcube) or stopped or skipblock or c > 200
 
@@ -1054,7 +1042,7 @@ local function placeBlock(pos, bsize)
     return childcube
 end
 
--- Paint block: equip Paint, teleport, fire, wait for color/material to match
+-- Paint block: equip Paint, fire, wait for color/material to match
 local function paintBlock(block, color, matStr, origmat)
     if not block or not block.Parent then return end
     local c = 0
@@ -1074,7 +1062,6 @@ local function paintBlock(block, color, matStr, origmat)
             if paintEvent and block and block.Parent then
                 pcall(function() paintEvent:FireServer(unpack(args)) end)
             end
-            tpToBlock(pos)
             task.wait(0.2)
         until not block or not block.Parent or block.Color == color or stopped or skipblock or c > 200
     end
@@ -1091,7 +1078,6 @@ local function paintBlock(block, color, matStr, origmat)
             if paintEvent and block and block.Parent then
                 pcall(function() paintEvent:FireServer(unpack(args)) end)
             end
-            tpToBlock(pos)
             task.wait(0.2)
         until not block or not block.Parent or block.Material == Enum.Material[origmat] or stopped or skipblock or c > 200
     end
@@ -1117,7 +1103,6 @@ local function resizeBlock(block, targetSize)
 
         while block and block.Parent and block.Size[axis] ~= target and not stopped and not skipblock and c < target * 4 do
             c = c + 1
-            local pos = block.Position + block.Size / 2
             local dir = block.Size[axis] > target and "decrease" or "increase"
 
             if player.Character and not player.Character:FindFirstChild("Shape") then
@@ -1126,11 +1111,10 @@ local function resizeBlock(block, targetSize)
 
             if shapeEvent then
                 pcall(function()
-                    shapeEvent:FireServer(block, face, pos, dir)
+                    shapeEvent:FireServer(block, face, block.Position + block.Size / 2, dir)
                 end)
             end
 
-            tpToBlock(pos)
             task.wait(resizewait)
         end
     end
