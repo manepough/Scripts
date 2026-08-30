@@ -612,6 +612,38 @@ makeToggle(deadlyTab, "Glitch blocks", 6, function(state)
     end)
 end)
 
+makeDivider(deadlyTab, 7)
+
+-- Fly toggle (uses game's built-in Flying attribute like command line)
+makeToggle(deadlyTab, "Fly", 8, function(state)
+    local char = player.Character
+    if not char then return end
+    -- toggle the Flying script if it exists
+    local flyScript = char:FindFirstChild("Flying")
+    if flyScript then
+        flyScript.Enabled = state
+    end
+    player:SetAttribute("Flying", state)
+    -- also use BodyVelocity approach as fallback
+    if state then
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if hum then hum.PlatformStand = false end
+        end
+    else
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            local bv = hrp:FindFirstChild("FlyBV")
+            if bv then bv:Destroy() end
+            local bg = hrp:FindFirstChild("FlyBG")
+            if bg then bg:Destroy() end
+        end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then hum.PlatformStand = false end
+    end
+end)
+
 -- ==================
 -- BUILD TAB
 -- ==================
@@ -1534,52 +1566,60 @@ makeBtn(stashTab, "Start Stash", 4, function()
             -- move to position
             hrp.CFrame = CFrame.new(stashposition + Vector3.new(x, 0, y))
             task.wait(0.3)
-
             if stopstash then break end
 
-            -- equip arkenstone first
+            -- equip arkenstone
             equipArkenstone()
             task.wait(0.3)
-
             if stopstash then break end
 
-            -- get bucket if not already in backpack/character
+            -- get bucket: loop until we have it, try 25162389 and 25162389.1
             local hasBucket = player.Backpack:FindFirstChild("BlueBucket") or (char:FindFirstChild("BlueBucket"))
             if not hasBucket then
-                sayInChat(";gear me 25162389.1")
-                task.wait(2) -- wait for gear to arrive
-                -- equip the bucket
-                local bucket = player.Backpack:FindFirstChild("BlueBucket")
-                if bucket then
-                    bucket.Parent = char
-                    task.wait(0.3)
-                end
-            else
-                -- move bucket to character so both are equipped
-                local bucket = player.Backpack:FindFirstChild("BlueBucket") or char:FindFirstChild("BlueBucket")
-                if bucket and bucket.Parent == player.Backpack then
-                    bucket.Parent = char
-                    task.wait(0.3)
+                setStashStatus("getting bucket...")
+                local bucketAttempts = 0
+                local useAlt = false
+                while not hasBucket and not stopstash do
+                    bucketAttempts = bucketAttempts + 1
+                    local gearId = useAlt and "25162389.1" or "25162389"
+                    sayInChat(";gear me " .. gearId)
+                    useAlt = not useAlt -- alternate between both IDs
+                    task.wait(2)
+                    hasBucket = player.Backpack:FindFirstChild("BlueBucket") or char:FindFirstChild("BlueBucket")
+                    if bucketAttempts > 10 then
+                        setStashStatus("can't get bucket, skipping", true)
+                        break
+                    end
                 end
             end
 
             if stopstash then break end
 
-            -- freeze, clone, unfreeze
+            -- equip both arkenstone AND bucket to character
+            equipArkenstone()
+            task.wait(0.2)
+            local bucket = player.Backpack:FindFirstChild("BlueBucket")
+            if bucket then
+                bucket.Parent = char
+                task.wait(0.2)
+            end
+
+            if stopstash then break end
+
+            -- freeze clone unfreeze
             sayInChat(";freeze me")
             task.wait(0.5)
-
             if stopstash then break end
 
             sayInChat(";clone me")
             task.wait(0.5)
-
             if stopstash then break end
 
             sayInChat(";unfreeze me")
 
-            -- move up and wait
+            -- move up and wait 5s cooldown between clones
             hrp.CFrame = CFrame.new(stashposition + Vector3.new(x, 15, y))
+            setStashStatus("stash " .. i .. "/" .. stashamt .. " — waiting 5s cooldown...")
             for w = 1, 5 do
                 task.wait(1)
                 if stopstash then break end
@@ -1625,16 +1665,30 @@ makeBtn(stashTab, "Go To Stash", 7, function()
     end
 end)
 
+-- Go to spawn
+makeBtn(stashTab, "Go To Spawn", 8, function()
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local spawn = workspace:FindFirstChild("Spawn")
+    if hrp and spawn then
+        hrp.CFrame = CFrame.new(spawn.Position + Vector3.new(0, 5, 0))
+        setStashStatus("teleported to spawn")
+    elseif hrp then
+        hrp.CFrame = CFrame.new(Vector3.new(0, 10, 0))
+        setStashStatus("teleported to origin")
+    end
+end)
+
 -- Toggle stash platform
-makeBtn(stashTab, "Toggle Stash Platform", 8, function()
+makeBtn(stashTab, "Toggle Stash Platform", 9, function()
     invisstashplatform.CanCollide = not invisstashplatform.CanCollide
     invisstashplatform.Transparency = invisstashplatform.CanCollide and 0.7 or 1
     setStashStatus("platform: " .. (invisstashplatform.CanCollide and "ON" or "OFF"))
 end)
 
-makeDivider(stashTab, 9)
-makeLabel(stashTab, "stash position (auto-generated)", 10)
-makeValue(stashTab, math.round(stashposition.X)..","..math.round(stashposition.Y)..","..math.round(stashposition.Z), 11)
+makeDivider(stashTab, 10)
+makeLabel(stashTab, "stash position (auto-generated)", 11)
+makeValue(stashTab, math.round(stashposition.X)..","..math.round(stashposition.Y)..","..math.round(stashposition.Z), 12)
 
 -- ==================
 -- ABUSE TAB
@@ -1650,7 +1704,6 @@ local function setAbuseStatus(msg, isErr)
     abuseStatus.TextColor3 = isErr and Color3.fromRGB(220,80,80) or Color3.fromRGB(80,200,120)
 end
 
--- target input
 makeLabel(abuseTab, "target username", 1)
 local targetInput = Instance.new("TextBox", abuseTab)
 targetInput.Size = UDim2.new(1, 0, 0, 28)
@@ -1674,106 +1727,72 @@ makeDivider(abuseTab, 3)
 local function getTarget()
     local name = targetInput.Text
     if name == "" then return nil end
-    -- try to find partial match
     for _, p in Players:GetPlayers() do
         if p.Name:lower():find(name:lower()) or p.DisplayName:lower():find(name:lower()) then
             return p.Name
         end
     end
-    return name -- use raw if not found
+    return name
 end
 
 local function sanitize(name)
-    -- trim to 7 chars, replace underscores like command line
     name = name:gsub("_", ".")
     return name:sub(1, 7)
 end
 
--- Individual abuse buttons
-makeBtn(abuseTab, "Oof (kill)", 4, function()
+-- Single full abuse toggle
+local abuseRunning = false
+makeToggle(abuseTab, "Full Abuse (toggle)", 4, function(state)
+    abuseRunning = state
+    if not state then
+        setAbuseStatus("abuse stopped")
+        return
+    end
     local t = getTarget()
-    if not t then setAbuseStatus("enter a target", true) return end
-    sayInChat(";oof " .. sanitize(t))
-    setAbuseStatus("oofed: " .. t)
-end)
-
-makeBtn(abuseTab, "Mute", 5, function()
-    local t = getTarget()
-    if not t then setAbuseStatus("enter a target", true) return end
-    sayInChat(";mute " .. sanitize(t))
-    setAbuseStatus("muted: " .. t)
-end)
-
-makeBtn(abuseTab, "Dumb", 6, function()
-    local t = getTarget()
-    if not t then setAbuseStatus("enter a target", true) return end
-    sayInChat(";dumb " .. sanitize(t))
-    setAbuseStatus("dumbed: " .. t)
-end)
-
-makeBtn(abuseTab, "Myopic", 7, function()
-    local t = getTarget()
-    if not t then setAbuseStatus("enter a target", true) return end
-    sayInChat(";myopic " .. sanitize(t))
-    setAbuseStatus("myopic: " .. t)
-end)
-
-makeBtn(abuseTab, "Blind", 8, function()
-    local t = getTarget()
-    if not t then setAbuseStatus("enter a target", true) return end
-    sayInChat(";blind " .. sanitize(t))
-    setAbuseStatus("blinded: " .. t)
-end)
-
-makeBtn(abuseTab, "Delete Cubes", 9, function()
-    local t = getTarget()
-    if not t then setAbuseStatus("enter a target", true) return end
-    sayInChat(";delcubes " .. sanitize(t))
-    setAbuseStatus("deleted cubes: " .. t)
-end)
-
-makeBtn(abuseTab, "Map Seed NaN", 10, function()
-    sayInChat(";mapseed nan")
-    setAbuseStatus("mapseed nan sent")
-end)
-
-makeDivider(abuseTab, 11)
-
--- Full abuse combo on target
-makeBtn(abuseTab, "FULL ABUSE (all at once)", 12, function()
-    local t = getTarget()
-    if not t then setAbuseStatus("enter a target", true) return end
-    local sn = sanitize(t)
+    if not t then
+        setAbuseStatus("enter a target first", true)
+        abuseRunning = false
+        return
+    end
     task.spawn(function()
-        setAbuseStatus("abusing: " .. t .. "...")
-        local delay = math.random(2, 3)
+        local sn = sanitize(t)
+        while abuseRunning do
+            setAbuseStatus("abusing: " .. t .. "...")
 
-        sayInChat(";oof " .. sn)
-        setAbuseStatus("oof sent... waiting")
-        task.wait(math.random(2, 3))
+            sayInChat(";oof " .. sn)
+            setAbuseStatus("oof sent")
+            task.wait(math.random(2, 3))
+            if not abuseRunning then break end
 
-        sayInChat(";mute " .. sn)
-        setAbuseStatus("mute sent... waiting")
-        task.wait(math.random(2, 3))
+            sayInChat(";mute " .. sn)
+            setAbuseStatus("mute sent")
+            task.wait(math.random(2, 3))
+            if not abuseRunning then break end
 
-        sayInChat(";dumb " .. sn)
-        setAbuseStatus("dumb sent... waiting")
-        task.wait(math.random(2, 3))
+            sayInChat(";dumb " .. sn)
+            setAbuseStatus("dumb sent")
+            task.wait(math.random(2, 3))
+            if not abuseRunning then break end
 
-        sayInChat(";myopic " .. sn)
-        setAbuseStatus("myopic sent... waiting")
-        task.wait(math.random(2, 3))
+            sayInChat(";myopic " .. sn)
+            setAbuseStatus("myopic sent")
+            task.wait(math.random(2, 3))
+            if not abuseRunning then break end
 
-        sayInChat(";blind " .. sn)
-        setAbuseStatus("blind sent... waiting")
-        task.wait(math.random(2, 3))
+            sayInChat(";blind " .. sn)
+            setAbuseStatus("blind sent")
+            task.wait(math.random(2, 3))
+            if not abuseRunning then break end
 
-        sayInChat(";delcubes " .. sn)
-        setAbuseStatus("delcubes sent... waiting")
-        task.wait(math.random(2, 3))
+            sayInChat(";delcubes " .. sn)
+            setAbuseStatus("delcubes sent")
+            task.wait(math.random(2, 3))
+            if not abuseRunning then break end
 
-        sayInChat(";mapseed nan")
-        setAbuseStatus("full abuse done: " .. t)
+            sayInChat(";mapseed nan")
+            setAbuseStatus("mapseed sent — looping...")
+            task.wait(math.random(2, 3))
+        end
     end)
 end)
 
