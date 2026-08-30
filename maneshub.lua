@@ -612,37 +612,6 @@ makeToggle(deadlyTab, "Glitch blocks", 6, function(state)
     end)
 end)
 
-makeDivider(deadlyTab, 7)
-
--- Fly toggle (uses game's built-in Flying attribute like command line)
-makeToggle(deadlyTab, "Fly", 8, function(state)
-    local char = player.Character
-    if not char then return end
-    -- toggle the Flying script if it exists
-    local flyScript = char:FindFirstChild("Flying")
-    if flyScript then
-        flyScript.Enabled = state
-    end
-    player:SetAttribute("Flying", state)
-    -- also use BodyVelocity approach as fallback
-    if state then
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            local hum = char:FindFirstChildOfClass("Humanoid")
-            if hum then hum.PlatformStand = false end
-        end
-    else
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            local bv = hrp:FindFirstChild("FlyBV")
-            if bv then bv:Destroy() end
-            local bg = hrp:FindFirstChild("FlyBG")
-            if bg then bg:Destroy() end
-        end
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum then hum.PlatformStand = false end
-    end
-end)
 
 -- ==================
 -- BUILD TAB
@@ -1583,7 +1552,8 @@ makeBtn(stashTab, "Start Stash", 4, function()
                     bucketAttempts = bucketAttempts + 1
                     local gearId = useAlt and "25162389.1" or "25162389"
                     sayInChat(";gear me " .. gearId)
-                    useAlt = not useAlt -- alternate between both IDs
+                    useAlt = not useAlt
+                    task.wait(1) -- 1s delay to avoid chat cooldown
                     task.wait(2)
                     hasBucket = player.Backpack:FindFirstChild("BlueBucket") or char:FindFirstChild("BlueBucket")
                     if bucketAttempts > 10 then
@@ -1704,7 +1674,7 @@ local function setAbuseStatus(msg, isErr)
     abuseStatus.TextColor3 = isErr and Color3.fromRGB(220,80,80) or Color3.fromRGB(80,200,120)
 end
 
-makeLabel(abuseTab, "target username", 1)
+makeLabel(abuseTab, "target (username / all / a / others / o)", 1)
 local targetInput = Instance.new("TextBox", abuseTab)
 targetInput.Size = UDim2.new(1, 0, 0, 28)
 targetInput.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
@@ -1712,7 +1682,7 @@ targetInput.BorderSizePixel = 0
 targetInput.Font = Enum.Font.Code
 targetInput.TextSize = 11
 targetInput.TextColor3 = Color3.fromRGB(200, 200, 200)
-targetInput.PlaceholderText = "enter username..."
+targetInput.PlaceholderText = "username / all / a / others / o"
 targetInput.PlaceholderColor3 = Color3.fromRGB(65, 65, 65)
 targetInput.Text = ""
 targetInput.LayoutOrder = 2
@@ -1724,20 +1694,48 @@ targetPad.PaddingLeft = UDim.new(0, 8)
 
 makeDivider(abuseTab, 3)
 
-local function getTarget()
-    local name = targetInput.Text
-    if name == "" then return nil end
-    for _, p in Players:GetPlayers() do
-        if p.Name:lower():find(name:lower()) or p.DisplayName:lower():find(name:lower()) then
-            return p.Name
-        end
-    end
-    return name
-end
+-- returns list of sanitized targets and whether mapseed is allowed
+local function getTargets()
+    local raw = targetInput.Text:lower():gsub("%s+", "")
+    local isAll = raw == "all" or raw == "a"
+    local isOthers = raw == "others" or raw == "o"
+    local isEmpty = raw == ""
+    local targets = {}
+    local mapseedAllowed = isEmpty -- only fire mapseed when no target typed
 
-local function sanitize(name)
-    name = name:gsub("_", ".")
-    return name:sub(1, 7)
+    if isEmpty then
+        -- no target = abuse everyone, send mapseed
+        for _, p in Players:GetPlayers() do
+            if p ~= player then
+                local sn = p.Name:gsub("_", "."):sub(1, 7)
+                table.insert(targets, sn)
+            end
+        end
+    elseif isAll then
+        for _, p in Players:GetPlayers() do
+            local sn = p.Name:gsub("_", "."):sub(1, 7)
+            table.insert(targets, sn)
+        end
+    elseif isOthers then
+        for _, p in Players:GetPlayers() do
+            if p ~= player then
+                local sn = p.Name:gsub("_", "."):sub(1, 7)
+                table.insert(targets, sn)
+            end
+        end
+    else
+        -- specific username = no mapseed
+        local found = nil
+        for _, p in Players:GetPlayers() do
+            if p.Name:lower():find(raw) or p.DisplayName:lower():find(raw) then
+                found = p
+                break
+            end
+        end
+        local name = found and found.Name or targetInput.Text
+        table.insert(targets, name:gsub("_", "."):sub(1, 7))
+    end
+    return targets, mapseedAllowed
 end
 
 -- Single full abuse toggle
@@ -1748,52 +1746,202 @@ makeToggle(abuseTab, "Full Abuse (toggle)", 4, function(state)
         setAbuseStatus("abuse stopped")
         return
     end
-    local t = getTarget()
-    if not t then
+    local targets, mapseedAllowed = getTargets()
+    if #targets == 0 then
         setAbuseStatus("enter a target first", true)
         abuseRunning = false
         return
     end
     task.spawn(function()
-        local sn = sanitize(t)
         while abuseRunning do
-            setAbuseStatus("abusing: " .. t .. "...")
+            for _, sn in targets do
+                if not abuseRunning then break end
 
-            sayInChat(";oof " .. sn)
-            setAbuseStatus("oof sent")
-            task.wait(math.random(2, 3))
-            if not abuseRunning then break end
+                sayInChat(";oof " .. sn)
+                setAbuseStatus("oof → " .. sn)
+                task.wait(math.random(2, 3))
+                if not abuseRunning then break end
 
-            sayInChat(";mute " .. sn)
-            setAbuseStatus("mute sent")
-            task.wait(math.random(2, 3))
-            if not abuseRunning then break end
+                sayInChat(";mute " .. sn)
+                setAbuseStatus("mute → " .. sn)
+                task.wait(math.random(2, 3))
+                if not abuseRunning then break end
 
-            sayInChat(";dumb " .. sn)
-            setAbuseStatus("dumb sent")
-            task.wait(math.random(2, 3))
-            if not abuseRunning then break end
+                sayInChat(";dumb " .. sn)
+                setAbuseStatus("dumb → " .. sn)
+                task.wait(math.random(2, 3))
+                if not abuseRunning then break end
 
-            sayInChat(";myopic " .. sn)
-            setAbuseStatus("myopic sent")
-            task.wait(math.random(2, 3))
-            if not abuseRunning then break end
+                sayInChat(";myopic " .. sn)
+                setAbuseStatus("myopic → " .. sn)
+                task.wait(math.random(2, 3))
+                if not abuseRunning then break end
 
-            sayInChat(";blind " .. sn)
-            setAbuseStatus("blind sent")
-            task.wait(math.random(2, 3))
-            if not abuseRunning then break end
+                sayInChat(";blind " .. sn)
+                setAbuseStatus("blind → " .. sn)
+                task.wait(math.random(2, 3))
+                if not abuseRunning then break end
 
-            sayInChat(";delcubes " .. sn)
-            setAbuseStatus("delcubes sent")
-            task.wait(math.random(2, 3))
-            if not abuseRunning then break end
+                sayInChat(";delcubes " .. sn)
+                setAbuseStatus("delcubes → " .. sn)
+                task.wait(math.random(2, 3))
+                if not abuseRunning then break end
+            end
 
-            sayInChat(";mapseed nan")
-            setAbuseStatus("mapseed sent — looping...")
-            task.wait(math.random(2, 3))
+            -- mapseed only fires when no specific target is set
+            if mapseedAllowed and abuseRunning then
+                sayInChat(";mapseed nan")
+                setAbuseStatus("mapseed sent — looping...")
+                task.wait(math.random(2, 3))
+            else
+                setAbuseStatus("looping...")
+                task.wait(1)
+            end
         end
     end)
+end)
+
+-- ==================
+-- MIC TAB
+-- ==================
+local micTab = createTab("Misc")
+
+local micStatus = makeLabel(micTab, "", 0)
+micStatus.TextColor3 = Color3.fromRGB(80, 200, 120)
+micStatus.LayoutOrder = 0
+
+local spychatLog = {}
+local spychatRunning = false
+local spychatConn = nil
+
+-- Fly toggle (moved here from Deadly)
+makeDivider(micTab, 1)
+makeLabel(micTab, "movement", 2)
+makeToggle(micTab, "Fly", 3, function(state)
+    local char = player.Character
+    if not char then return end
+    local flyScript = char:FindFirstChild("Flying")
+    if flyScript then flyScript.Enabled = state end
+    player:SetAttribute("Flying", state)
+    if not state then
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            local bv = hrp:FindFirstChild("FlyBV")
+            if bv then bv:Destroy() end
+            local bg = hrp:FindFirstChild("FlyBG")
+            if bg then bg:Destroy() end
+        end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then hum.PlatformStand = false end
+    end
+end)
+
+makeDivider(micTab, 4)
+makeLabel(micTab, "spy chat", 5)
+
+-- Spy chat log display
+local logFrame = Instance.new("ScrollingFrame", micTab)
+logFrame.Size = UDim2.new(1, 0, 0, 120)
+logFrame.BackgroundColor3 = Color3.fromRGB(14, 14, 14)
+logFrame.BorderSizePixel = 0
+logFrame.ScrollBarThickness = 2
+logFrame.ScrollBarImageColor3 = Color3.fromRGB(60, 60, 60)
+logFrame.LayoutOrder = 6
+logFrame.ZIndex = 7
+Instance.new("UICorner", logFrame).CornerRadius = UDim.new(0, 7)
+local logLayout = Instance.new("UIListLayout", logFrame)
+logLayout.Padding = UDim.new(0, 2)
+logLayout.SortOrder = Enum.SortOrder.LayoutOrder
+local logPad = Instance.new("UIPadding", logFrame)
+logPad.PaddingLeft = UDim.new(0, 6)
+logPad.PaddingRight = UDim.new(0, 6)
+logPad.PaddingTop = UDim.new(0, 4)
+logLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    logFrame.CanvasSize = UDim2.new(0, 0, 0, logLayout.AbsoluteContentSize.Y + 8)
+    logFrame.CanvasPosition = Vector2.new(0, logLayout.AbsoluteContentSize.Y)
+end)
+
+local function addLogEntry(plrName, msg, isHidden)
+    local prefix = isHidden and "[HIDDEN] " or ""
+    local entry = prefix .. plrName .. ": \"" .. msg .. "\""
+    table.insert(spychatLog, entry)
+
+    local lbl = Instance.new("TextLabel", logFrame)
+    lbl.Size = UDim2.new(1, 0, 0, 14)
+    lbl.BackgroundTransparency = 1
+    lbl.Font = Enum.Font.Code
+    lbl.TextSize = 10
+    lbl.TextColor3 = isHidden and Color3.fromRGB(255, 80, 80) or Color3.fromRGB(180, 180, 180)
+    lbl.Text = entry
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.TextTruncate = Enum.TextTruncate.AtEnd
+    lbl.ZIndex = 8
+    lbl.LayoutOrder = #spychatLog
+end
+
+-- Spy chat toggle
+makeToggle(micTab, "Spy Chat (silent + whispers)", 7, function(state)
+    spychatRunning = state
+    if state then
+        -- hook OnIncomingMessage to catch all messages including silent/whisper
+        local tcs = game:GetService("TextChatService")
+        local tc = tcs.TextChannels
+
+        -- hook all existing channels
+        local function hookChannel(channel)
+            channel.MessageReceived:Connect(function(msg)
+                if not spychatRunning then return end
+                local src = msg.TextSource
+                if not src then return end
+                local p = Players:GetPlayerByUserId(src.UserId)
+                if not p then return end
+                local text = msg.Text
+                if text == "" then return end
+                local isHidden = text:sub(1,1) == ";"
+                    or channel.Name:find("RBXWhisper")
+                addLogEntry(p.Name, text, isHidden)
+            end)
+        end
+
+        for _, ch in tc:GetChildren() do
+            pcall(function() hookChannel(ch) end)
+        end
+        -- also hook new channels (whispers created on demand)
+        spychatConn = tc.ChildAdded:Connect(function(ch)
+            if not spychatRunning then return end
+            task.wait(0.1)
+            pcall(function() hookChannel(ch) end)
+        end)
+
+        micStatus.Text = "spying..."
+    else
+        if spychatConn then spychatConn:Disconnect() spychatConn = nil end
+        micStatus.Text = "spy chat off"
+    end
+end)
+
+makeDivider(micTab, 8)
+
+-- Download log
+makeBtn(micTab, "Download Chat Log", 9, function()
+    if #spychatLog == 0 then
+        micStatus.Text = "no messages yet"
+        return
+    end
+    local content = table.concat(spychatLog, "\n")
+    pcall(function()
+        writefile("ManesHubChatLog.txt", content)
+        micStatus.Text = "saved to ManesHubChatLog.txt"
+    end)
+end)
+
+-- Clear log
+makeBtn(micTab, "Clear Log", 10, function()
+    spychatLog = {}
+    for _, c in logFrame:GetChildren() do
+        if c:IsA("TextLabel") then c:Destroy() end
+    end
+    micStatus.Text = "log cleared"
 end)
 
 -- ==================
