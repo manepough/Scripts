@@ -700,15 +700,15 @@ local function listSaves()
     return files
 end
 
--- save a single block's data
 local function saveBlock(bl)
     if not bl:IsA("BasePart") then return nil end
     local bd = {}
-    bd.p = {bl.Position.X, bl.Position.Y, bl.Position.Z}
-    bd.c = {math.round(bl.Color.R*255), math.round(bl.Color.G*255), math.round(bl.Color.B*255)}
-    bd.m = materials[bl.Material] or "smooth"
-    bd.o = bl.Material.Name
-    bd.a = bl.Anchored
+    bd.a  = bl.Anchored
+    bd.p  = {bl.Position.X, bl.Position.Y, bl.Position.Z}
+    bd.c  = {math.round(bl.Color.R*255), math.round(bl.Color.G*255), math.round(bl.Color.B*255)}
+    bd.m  = getMaterialStr(bl.Material)
+    bd.sp = {}
+    bd.o  = bl.Material.Name
     bd.cc = bl.CanCollide
     if bl.Size.X ~= 4 or bl.Size.Y ~= 4 or bl.Size.Z ~= 4 then
         bd.s = {bl.Size.X, bl.Size.Y, bl.Size.Z}
