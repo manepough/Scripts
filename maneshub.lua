@@ -140,25 +140,41 @@ closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 closeBtn.ZIndex = 8
 Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 6)
 
--- Tab bar
-local tabBar = Instance.new("Frame", bg)
-tabBar.Size = UDim2.new(1, 0, 0, 30)
+-- Left side tab bar (scrollable vertical)
+local tabBar = Instance.new("ScrollingFrame", bg)
+tabBar.Size = UDim2.new(0, 80, 1, -34)
 tabBar.Position = UDim2.new(0, 0, 0, 34)
-tabBar.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
+tabBar.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
 tabBar.BackgroundTransparency = 0
 tabBar.BorderSizePixel = 0
+tabBar.ScrollBarThickness = 2
+tabBar.ScrollBarImageColor3 = Color3.fromRGB(50, 50, 50)
+tabBar.ScrollingDirection = Enum.ScrollingDirection.Y
 tabBar.ZIndex = 6
 local tabList = Instance.new("UIListLayout", tabBar)
-tabList.FillDirection = Enum.FillDirection.Horizontal
-tabList.Padding = UDim.new(0, 4)
-tabList.VerticalAlignment = Enum.VerticalAlignment.Center
+tabList.FillDirection = Enum.FillDirection.Vertical
+tabList.Padding = UDim.new(0, 3)
+tabList.SortOrder = Enum.SortOrder.LayoutOrder
+tabList.HorizontalAlignment = Enum.HorizontalAlignment.Center
 local tabPad = Instance.new("UIPadding", tabBar)
-tabPad.PaddingLeft = UDim.new(0, 8)
+tabPad.PaddingTop = UDim.new(0, 6)
+tabPad.PaddingBottom = UDim.new(0, 6)
+tabList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    tabBar.CanvasSize = UDim2.new(0, 0, 0, tabList.AbsoluteContentSize.Y + 12)
+end)
 
--- Content area
+-- Left border line
+local tabBorder = Instance.new("Frame", bg)
+tabBorder.Size = UDim2.new(0, 1, 1, -34)
+tabBorder.Position = UDim2.new(0, 80, 0, 34)
+tabBorder.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+tabBorder.BorderSizePixel = 0
+tabBorder.ZIndex = 6
+
+-- Content area (right of tabs)
 local contentArea = Instance.new("Frame", bg)
-contentArea.Size = UDim2.new(1, 0, 1, -64)
-contentArea.Position = UDim2.new(0, 0, 0, 64)
+contentArea.Size = UDim2.new(1, -81, 1, -34)
+contentArea.Position = UDim2.new(0, 81, 0, 34)
 contentArea.BackgroundTransparency = 1
 contentArea.ZIndex = 6
 
@@ -181,14 +197,15 @@ end
 
 local function createTab(name)
     local btn = Instance.new("TextButton", tabBar)
-    btn.Size = UDim2.new(0, 76, 0, 22)
+    btn.Size = UDim2.new(0, 70, 0, 28)
     btn.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
     btn.BorderSizePixel = 0
     btn.Text = name
     btn.Font = Enum.Font.Gotham
-    btn.TextSize = 11
+    btn.TextSize = 10
     btn.TextColor3 = Color3.fromRGB(120, 120, 120)
     btn.ZIndex = 7
+    btn.TextWrapped = true
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
 
     local scroll = Instance.new("ScrollingFrame", contentArea)
@@ -203,8 +220,8 @@ local function createTab(name)
     layout.Padding = UDim.new(0, 7)
     layout.SortOrder = Enum.SortOrder.LayoutOrder
     local pad = Instance.new("UIPadding", scroll)
-    pad.PaddingLeft = UDim.new(0, 12)
-    pad.PaddingRight = UDim.new(0, 12)
+    pad.PaddingLeft = UDim.new(0, 10)
+    pad.PaddingRight = UDim.new(0, 10)
     pad.PaddingTop = UDim.new(0, 10)
     layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
         scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 20)
@@ -620,20 +637,39 @@ local buildTab = createTab("Build")
 
 local materials = {}
 materials[Enum.Material.SmoothPlastic] = "smooth"
-materials[Enum.Material.Plastic] = "plastic"
-materials[Enum.Material.Neon] = "neon"
-materials[Enum.Material.Brick] = "bricks"
-materials[Enum.Material.WoodPlanks] = "planks"
-materials[Enum.Material.Ice] = "ice"
-materials[Enum.Material.Grass] = "grass"
-materials[Enum.Material.Sand] = "sand"
-materials[Enum.Material.Snow] = "snow"
-materials[Enum.Material.Glass] = "glass"
-materials[Enum.Material.Wood] = "wood"
-materials[Enum.Material.Slate] = "stone"
-materials[Enum.Material.Metal] = "metal"
-materials[Enum.Material.Concrete] = "concrete"
-materials[Enum.Material.DiamondPlate] = "steel"
+materials[Enum.Material.Plastic]       = "plastic"
+materials[Enum.Material.Neon]          = "neon"
+materials[Enum.Material.Brick]         = "bricks"
+materials[Enum.Material.WoodPlanks]    = "planks"
+materials[Enum.Material.Ice]           = "ice"
+materials[Enum.Material.Grass]         = "grass"
+materials[Enum.Material.Sand]          = "sand"
+materials[Enum.Material.Snow]          = "snow"
+materials[Enum.Material.Glass]         = "glass"
+materials[Enum.Material.Wood]          = "wood"
+materials[Enum.Material.Slate]         = "stone"
+materials[Enum.Material.Metal]         = "metal"
+materials[Enum.Material.Concrete]      = "concrete"
+materials[Enum.Material.DiamondPlate]  = "steel"
+materials[Enum.Material.Cobblestone]   = "pebble"
+materials[Enum.Material.Marble]        = "marble"
+materials[Enum.Material.Granite]       = "granite"
+materials[Enum.Material.Asphalt]       = "asphalt"
+materials[Enum.Material.Pavement]      = "pavement"
+
+-- friend's material map (covers extra names from BuildTools)
+local materialMap = {
+    SmoothPlastic="smooth", Plastic="plastic", Wood="wood", WoodPlanks="planks",
+    Brick="bricks", Glass="glass", Slate="stone", Cobblestone="pebble", Marble="marble",
+    Ice="ice", Grass="grass", Sand="sand", Snow="snow", Granite="granite",
+    DiamondPlate="steel", CorrodedMetal="metal", Metal="metal", Asphalt="asphalt",
+    Concrete="concrete", Pavement="pavement", Neon="neon",
+    CeramicTiles="tiles", Sandstone="sandstone", Limestone="limestone",
+}
+local function getMaterialStr(mat)
+    local matName = typeof(mat) == "EnumItem" and mat.Name or tostring(mat):match("Enum%.Material%.(.+)") or tostring(mat)
+    return materialMap[matName] or materials[mat] or "smooth"
+end
 
 local BUILDS_FOLDER = "ManesHubBuilds"
 local autoBuildRunning = false
@@ -1010,7 +1046,31 @@ local function getBackpackEvent(toolName)
     return nil
 end
 
--- Place one block: equip Build, fire, wait for ChildAdded
+-- Friend's getInfiniteBuildArgs: finds adjacent block to build from for infinite range
+local function getInfiniteBuildArgs(targetPos)
+    local bricks = workspace:FindFirstChild("Bricks")
+    if bricks then
+        for _, p in ipairs(bricks:GetDescendants()) do
+            if p:IsA("BasePart") then
+                local diff = targetPos - p.Position
+                if math.abs(diff.Magnitude - 4) < 0.2 then
+                    local normal = Enum.NormalId.Top
+                    if     diff.X >  3 then normal = Enum.NormalId.Right
+                    elseif diff.X < -3 then normal = Enum.NormalId.Left
+                    elseif diff.Y >  3 then normal = Enum.NormalId.Top
+                    elseif diff.Y < -3 then normal = Enum.NormalId.Bottom
+                    elseif diff.Z >  3 then normal = Enum.NormalId.Back
+                    elseif diff.Z < -3 then normal = Enum.NormalId.Front
+                    end
+                    return p, normal, targetPos
+                end
+            end
+        end
+    end
+    return workspace.Terrain, Enum.NormalId.Top, targetPos
+end
+
+-- Place one block using getInfiniteBuildArgs for infinite range
 local function placeBlock(pos, bsize)
     built = false
     childcube = nil
@@ -1019,59 +1079,56 @@ local function placeBlock(pos, bsize)
     local buildEvent = getBackpackEvent("Build")
     if not buildEvent then return nil end
 
-    local args = {workspace.Terrain, Enum.NormalId.Top, pos, bsize or "normal"}
+    -- use adjacent block method (friend's approach) for infinite placement
+    local tBlock, tNorm, tHit = getInfiniteBuildArgs(pos)
+    local args = {tBlock, tNorm, tHit, bsize or "normal"}
 
-    -- fire once before loop
-    pcall(function() buildEvent:FireServer(unpack(args)) end)
+    pcall(function() buildEvent:FireServer(table.unpack(args)) end)
 
     repeat
         c = c + 1
-        -- refetch each pass in case the tool reference goes stale
         buildEvent = getBackpackEvent("Build") or buildEvent
+        -- refresh getInfiniteBuildArgs each retry in case new blocks were placed
+        tBlock, tNorm, tHit = getInfiniteBuildArgs(pos)
+        args = {tBlock, tNorm, tHit, bsize or "normal"}
         if buildEvent then
-            pcall(function() buildEvent:FireServer(unpack(args)) end)
+            pcall(function() buildEvent:FireServer(table.unpack(args)) end)
         end
-        task.wait(0.1)
+        task.wait(0.08)
     until (built and childcube) or stopped or skipblock or c > 200
 
     built = false
     return childcube
 end
 
--- Paint block: fire directly from Backpack, no equip. Waits for color/material to match.
+-- Paint block using friend's method: fires color+material together with "both 🤝"
 local function paintBlock(block, color, matStr, origmat)
     if not block or not block.Parent then return end
     local c = 0
     local pos = block.Position + block.Size / 2
+    local mat = matStr or getMaterialStr(block.Material)
 
     local paintEvent = getBackpackEvent("Paint")
     if not paintEvent then return end
 
     if color then
-        local args = {block, Enum.NormalId.Top, pos, "both \xF0\x9F\xA4\x9D", color, matStr or "smooth", ""}
+        -- use "both 🤝" to set color AND material in one call (friend's method)
+        local args = {block, Enum.NormalId.Top, pos, "both \xF0\x9F\xA4\x9D", color, mat, ""}
         c = 0
         repeat
             c = c + 1
             paintEvent = getBackpackEvent("Paint") or paintEvent
             if paintEvent and block and block.Parent then
-                pcall(function() paintEvent:FireServer(unpack(args)) end)
+                pos = block.Position + block.Size / 2
+                args[3] = pos
+                pcall(function() paintEvent:FireServer(table.unpack(args)) end)
             end
             task.wait(0.2)
-        until not block or not block.Parent or block.Color == color or stopped or skipblock or c > 200
-    end
-
-    -- material only if needed
-    if origmat and block and block.Parent and block.Material ~= Enum.Material[origmat] then
-        local args = {block, Enum.NormalId.Top, pos, "material", nil, matStr or "smooth", ""}
-        c = 0
-        repeat
-            c = c + 1
-            paintEvent = getBackpackEvent("Paint") or paintEvent
-            if paintEvent and block and block.Parent then
-                pcall(function() paintEvent:FireServer(unpack(args)) end)
-            end
-            task.wait(0.2)
-        until not block or not block.Parent or block.Material == Enum.Material[origmat] or stopped or skipblock or c > 200
+        until not block or not block.Parent
+            or (math.abs(block.Color.R - color.R) < 0.02
+                and math.abs(block.Color.G - color.G) < 0.02
+                and math.abs(block.Color.B - color.B) < 0.02)
+            or stopped or skipblock or c > 200
     end
 end
 
@@ -1880,42 +1937,52 @@ local function addLogEntry(plrName, msg, isHidden)
 end
 
 -- Spy chat toggle
+local prevOIM = nil
 makeToggle(micTab, "Spy Chat (silent + whispers)", 7, function(state)
     spychatRunning = state
+    local tcs = game:GetService("TextChatService")
     if state then
-        -- hook OnIncomingMessage to catch all messages including silent/whisper
-        local tcs = game:GetService("TextChatService")
-        local tc = tcs.TextChannels
+        -- save existing handler
+        prevOIM = tcs.OnIncomingMessage
 
-        -- hook all existing channels
-        local function hookChannel(channel)
-            channel.MessageReceived:Connect(function(msg)
-                if not spychatRunning then return end
-                local src = msg.TextSource
-                if not src then return end
-                local p = Players:GetPlayerByUserId(src.UserId)
-                if not p then return end
-                local text = msg.Text
-                if text == "" then return end
-                local isHidden = text:sub(1,1) == ";"
-                    or channel.Name:find("RBXWhisper")
-                addLogEntry(p.Name, text, isHidden)
-            end)
-        end
+        -- hook exactly like command line oim
+        tcs.OnIncomingMessage = function(mdata)
+            -- call original if exists
+            if prevOIM then pcall(prevOIM, mdata) end
 
-        for _, ch in tc:GetChildren() do
-            pcall(function() hookChannel(ch) end)
+            local src = mdata.TextSource
+            if not src then return end
+            local p = Players:GetPlayerByUserId(src.UserId)
+            if not p or p == player then return end
+
+            local msg = mdata.Text
+            if not msg or msg == "" then return end
+
+            local isHidden = msg:sub(1,1) == ";"
+                or mdata.TextChannel and mdata.TextChannel.Name:find("RBXWhisper")
+
+            -- log it
+            addLogEntry(p.Name, msg, isHidden)
+
+            -- display in RBXGeneral chat so we can see it in game
+            if isHidden then
+                pcall(function()
+                    tcs.TextChannels.RBXGeneral:DisplaySystemMessage(
+                        string.format("[SPY] %s: %s", p.Name, msg)
+                    )
+                end)
+            end
         end
-        -- also hook new channels (whispers created on demand)
-        spychatConn = tc.ChildAdded:Connect(function(ch)
-            if not spychatRunning then return end
-            task.wait(0.1)
-            pcall(function() hookChannel(ch) end)
-        end)
 
         micStatus.Text = "spying..."
     else
-        if spychatConn then spychatConn:Disconnect() spychatConn = nil end
+        -- restore original
+        if prevOIM then
+            tcs.OnIncomingMessage = prevOIM
+            prevOIM = nil
+        else
+            tcs.OnIncomingMessage = nil
+        end
         micStatus.Text = "spy chat off"
     end
 end)
