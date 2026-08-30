@@ -1374,10 +1374,17 @@ makeToggle(autoTab, "Auto pickup Enlighten/Arkenstone", 1, function(state)
             local char = player.Character
             local hum = char and char:FindFirstChildOfClass("Humanoid")
             if hum and hum.Health > 0 then
+                -- check workspace directly for The Arkenstone dropped there
+                for _, v in workspace:GetChildren() do
+                    if v:IsA("Tool") and v.Name == "The Arkenstone" then
+                        pcall(function() hum:EquipTool(v) end)
+                        autoStatus.Text = "picked up: The Arkenstone"
+                    end
+                end
+                -- also check for any enlighten-related tools dropped in workspace
                 for _, v in workspace:GetChildren() do
                     if v:IsA("Tool") and v:FindFirstChild("Handle")
-                        and (v.Name == "The Arkenstone" or v.Name:lower():find("enlighten"))
-                        and v:HasTag("DroppedByScript") then
+                        and v.Name:lower():find("enlighten") then
                         pcall(function() hum:EquipTool(v) end)
                         autoStatus.Text = "picked up: " .. v.Name
                     end
@@ -1518,7 +1525,7 @@ makeBtn(stashTab, "Start Stash", 4, function()
                 break
             end
 
-            -- grid position (faster: no wait between position checks)
+            -- grid position
             local clonesFolder = workspace:FindFirstChild("Clones") and workspace.Clones:FindFirstChild(player.Name)
             local cloneamt = clonesFolder and #clonesFolder:GetChildren() or 0
             local x = (cloneamt % 4) * 10
@@ -1526,17 +1533,39 @@ makeBtn(stashTab, "Start Stash", 4, function()
 
             -- move to position
             hrp.CFrame = CFrame.new(stashposition + Vector3.new(x, 0, y))
-            task.wait(0.3) -- faster than command line's 1s wait
+            task.wait(0.3)
 
             if stopstash then break end
 
-            -- equip arkenstone
+            -- equip arkenstone first
             equipArkenstone()
             task.wait(0.3)
 
             if stopstash then break end
 
-            -- freeze, clone, unfreeze (faster timing)
+            -- get bucket if not already in backpack/character
+            local hasBucket = player.Backpack:FindFirstChild("BlueBucket") or (char:FindFirstChild("BlueBucket"))
+            if not hasBucket then
+                sayInChat(";gear me 25162389.1")
+                task.wait(2) -- wait for gear to arrive
+                -- equip the bucket
+                local bucket = player.Backpack:FindFirstChild("BlueBucket")
+                if bucket then
+                    bucket.Parent = char
+                    task.wait(0.3)
+                end
+            else
+                -- move bucket to character so both are equipped
+                local bucket = player.Backpack:FindFirstChild("BlueBucket") or char:FindFirstChild("BlueBucket")
+                if bucket and bucket.Parent == player.Backpack then
+                    bucket.Parent = char
+                    task.wait(0.3)
+                end
+            end
+
+            if stopstash then break end
+
+            -- freeze, clone, unfreeze
             sayInChat(";freeze me")
             task.wait(0.5)
 
@@ -1549,7 +1578,7 @@ makeBtn(stashTab, "Start Stash", 4, function()
 
             sayInChat(";unfreeze me")
 
-            -- move up and wait for clone to finish (reduced from 10s to 5s)
+            -- move up and wait
             hrp.CFrame = CFrame.new(stashposition + Vector3.new(x, 15, y))
             for w = 1, 5 do
                 task.wait(1)
