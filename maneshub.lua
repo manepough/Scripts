@@ -1317,6 +1317,438 @@ makeBuildBtn(buildTab, "Get Decal Tool", 16, function()
 end)
 
 -- ==================
+-- SHARED HELPERS
+-- ==================
+local function makeBtn(parent, text, order, callback)
+    local btn = Instance.new("TextButton", parent)
+    btn.Size = UDim2.new(1, 0, 0, 30)
+    btn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    btn.BorderSizePixel = 0
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 11
+    btn.TextColor3 = Color3.fromRGB(200, 200, 200)
+    btn.Text = text
+    btn.LayoutOrder = order or 0
+    btn.ZIndex = 7
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 7)
+    local st = Instance.new("UIStroke", btn)
+    st.Color = Color3.fromRGB(45, 45, 45)
+    st.Thickness = 1
+    btn.MouseButton1Click:Connect(callback)
+    return btn
+end
+
+local function sayInChat(text)
+    pcall(function()
+        game:GetService("TextChatService").TextChannels.RBXGeneral:SendAsync(text)
+    end)
+end
+
+local function hasArkenstone()
+    return player.Character and player.Character:FindFirstChild("The Arkenstone")
+        or player.Backpack:FindFirstChild("The Arkenstone")
+end
+
+local function equipArkenstone()
+    local a = player.Backpack:FindFirstChild("The Arkenstone")
+    if a and player.Character then a.Parent = player.Character end
+    return player.Character and player.Character:FindFirstChild("The Arkenstone")
+end
+
+-- ==================
+-- AUTOMATION TAB
+-- ==================
+local autoTab = createTab("Auto")
+
+local autoStatus = makeLabel(autoTab, "", 0)
+autoStatus.TextColor3 = Color3.fromRGB(80, 200, 120)
+autoStatus.LayoutOrder = 0
+
+-- Auto pick up Enlighten/Arkenstone
+local pickupRunning = false
+makeToggle(autoTab, "Auto pickup Enlighten/Arkenstone", 1, function(state)
+    pickupRunning = state
+    if not state then return end
+    task.spawn(function()
+        while pickupRunning do
+            local char = player.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if hum and hum.Health > 0 then
+                for _, v in workspace:GetChildren() do
+                    if v:IsA("Tool") and v:FindFirstChild("Handle")
+                        and (v.Name == "The Arkenstone" or v.Name:lower():find("enlighten"))
+                        and v:HasTag("DroppedByScript") then
+                        pcall(function() hum:EquipTool(v) end)
+                        autoStatus.Text = "picked up: " .. v.Name
+                    end
+                end
+            end
+            task.wait(0.1)
+        end
+        autoStatus.Text = ""
+    end)
+end)
+
+makeDivider(autoTab, 2)
+
+-- Auto keep Arkenstone equipped
+local autoArkRunning = false
+makeToggle(autoTab, "Auto keep Arkenstone equipped", 3, function(state)
+    autoArkRunning = state
+    if not state then return end
+    task.spawn(function()
+        while autoArkRunning do
+            local char = player.Character
+            if char then
+                local a = player.Backpack:FindFirstChild("The Arkenstone")
+                if a then
+                    pcall(function() a.Parent = char end)
+                    autoStatus.Text = "arkenstone kept"
+                end
+            end
+            task.wait(0.2)
+        end
+        autoStatus.Text = ""
+    end)
+end)
+
+makeDivider(autoTab, 4)
+
+-- ==================
+-- STASH TAB
+-- ==================
+local stashTab = createTab("Stash")
+
+local stashStatus = makeLabel(stashTab, "", 0)
+stashStatus.TextColor3 = Color3.fromRGB(80, 200, 120)
+stashStatus.LayoutOrder = 0
+
+local stopstash = false
+
+-- random position far away like command line
+local rng = Random.new()
+local function randomoutlier(positiveonly)
+    local ro = rng:NextInteger(5000, 10000)
+    if positiveonly or rng:NextNumber() >= 0.5 then return ro
+    else return -ro end
+end
+
+local cfolder = workspace:FindFirstChild("Bricks")
+local playerIndex = 1
+if cfolder then
+    for i, v in cfolder:GetChildren() do
+        if v.Name == player.Name then playerIndex = i break end
+    end
+end
+
+local stashposition = Vector3.new(
+    randomoutlier(),
+    randomoutlier(true) + (playerIndex * 40),
+    randomoutlier()
+)
+
+-- invisible stash platform
+local invisstashplatform = Instance.new("Part")
+invisstashplatform.CFrame = CFrame.new(stashposition - Vector3.new(0, 10, 0))
+invisstashplatform.Anchored = true
+invisstashplatform.Transparency = 0.9
+invisstashplatform.Color = Color3.fromRGB(0, 255, 0)
+invisstashplatform.Size = Vector3.new(200, 0, 1000)
+invisstashplatform.CanCollide = true
+invisstashplatform.Parent = workspace
+
+local function setStashStatus(msg, isErr)
+    stashStatus.Text = msg
+    stashStatus.TextColor3 = isErr and Color3.fromRGB(220,80,80) or Color3.fromRGB(80,200,120)
+end
+
+-- stash amount input
+makeLabel(stashTab, "stash amount", 1)
+local stashInput = Instance.new("TextBox", stashTab)
+stashInput.Size = UDim2.new(1, 0, 0, 28)
+stashInput.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+stashInput.BorderSizePixel = 0
+stashInput.Font = Enum.Font.Code
+stashInput.TextSize = 11
+stashInput.TextColor3 = Color3.fromRGB(200, 200, 200)
+stashInput.PlaceholderText = "how many stashes..."
+stashInput.PlaceholderColor3 = Color3.fromRGB(65, 65, 65)
+stashInput.Text = "2"
+stashInput.LayoutOrder = 2
+stashInput.ClearTextOnFocus = false
+stashInput.ZIndex = 7
+Instance.new("UICorner", stashInput).CornerRadius = UDim.new(0, 7)
+local stashPad = Instance.new("UIPadding", stashInput)
+stashPad.PaddingLeft = UDim.new(0, 8)
+
+makeDivider(stashTab, 3)
+
+-- Start stash
+makeBtn(stashTab, "Start Stash", 4, function()
+    if not hasArkenstone() then
+        setStashStatus("need Arkenstone/Enlighten!", true)
+        return
+    end
+    local stashamt = tonumber(stashInput.Text) or 2
+    stopstash = false
+    task.spawn(function()
+        local char = player.Character
+        if not char then return end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        local originalCFrame = hrp.CFrame
+
+        -- mute self first
+        if not player:HasTag("Muted") then
+            task.wait(0.5)
+            sayInChat(";mute me")
+            task.wait(3.5)
+        end
+
+        -- teleport to stash position
+        hrp.CFrame = CFrame.new(stashposition + Vector3.new(0, 30, 0))
+
+        for i = 1, stashamt do
+            if stopstash then break end
+
+            -- check arkenstone
+            if not hasArkenstone() then
+                setStashStatus("lost arkenstone, stopping", true)
+                stopstash = true
+                break
+            end
+
+            -- grid position (faster: no wait between position checks)
+            local clonesFolder = workspace:FindFirstChild("Clones") and workspace.Clones:FindFirstChild(player.Name)
+            local cloneamt = clonesFolder and #clonesFolder:GetChildren() or 0
+            local x = (cloneamt % 4) * 10
+            local y = math.floor(cloneamt / 4) * 10
+
+            -- move to position
+            hrp.CFrame = CFrame.new(stashposition + Vector3.new(x, 0, y))
+            task.wait(0.3) -- faster than command line's 1s wait
+
+            if stopstash then break end
+
+            -- equip arkenstone
+            equipArkenstone()
+            task.wait(0.3)
+
+            if stopstash then break end
+
+            -- freeze, clone, unfreeze (faster timing)
+            sayInChat(";freeze me")
+            task.wait(0.5)
+
+            if stopstash then break end
+
+            sayInChat(";clone me")
+            task.wait(0.5)
+
+            if stopstash then break end
+
+            sayInChat(";unfreeze me")
+
+            -- move up and wait for clone to finish (reduced from 10s to 5s)
+            hrp.CFrame = CFrame.new(stashposition + Vector3.new(x, 15, y))
+            for w = 1, 5 do
+                task.wait(1)
+                if stopstash then break end
+            end
+
+            setStashStatus("stash " .. i .. "/" .. stashamt .. " done")
+        end
+
+        -- unmute and return
+        task.wait(0.5)
+        sayInChat(";unmute me")
+        task.wait(0.5)
+
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then hum:UnequipTools() end
+        task.wait(0.3)
+        hrp.CFrame = originalCFrame
+
+        if not stopstash then
+            setStashStatus("stash complete! " .. stashamt .. " done")
+        else
+            setStashStatus("stash stopped")
+        end
+        stopstash = false
+    end)
+end)
+
+-- Stop stash
+makeBtn(stashTab, "Stop Stash", 5, function()
+    stopstash = true
+    setStashStatus("stopping stash...")
+end)
+
+makeDivider(stashTab, 6)
+
+-- Go to stash
+makeBtn(stashTab, "Go To Stash", 7, function()
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        hrp.CFrame = CFrame.new(stashposition + Vector3.new(-20, 30, -20))
+        setStashStatus("teleported to stash")
+    end
+end)
+
+-- Toggle stash platform
+makeBtn(stashTab, "Toggle Stash Platform", 8, function()
+    invisstashplatform.CanCollide = not invisstashplatform.CanCollide
+    invisstashplatform.Transparency = invisstashplatform.CanCollide and 0.7 or 1
+    setStashStatus("platform: " .. (invisstashplatform.CanCollide and "ON" or "OFF"))
+end)
+
+makeDivider(stashTab, 9)
+makeLabel(stashTab, "stash position (auto-generated)", 10)
+makeValue(stashTab, math.round(stashposition.X)..","..math.round(stashposition.Y)..","..math.round(stashposition.Z), 11)
+
+-- ==================
+-- ABUSE TAB
+-- ==================
+local abuseTab = createTab("Abuse")
+
+local abuseStatus = makeLabel(abuseTab, "", 0)
+abuseStatus.TextColor3 = Color3.fromRGB(80, 200, 120)
+abuseStatus.LayoutOrder = 0
+
+local function setAbuseStatus(msg, isErr)
+    abuseStatus.Text = msg
+    abuseStatus.TextColor3 = isErr and Color3.fromRGB(220,80,80) or Color3.fromRGB(80,200,120)
+end
+
+-- target input
+makeLabel(abuseTab, "target username", 1)
+local targetInput = Instance.new("TextBox", abuseTab)
+targetInput.Size = UDim2.new(1, 0, 0, 28)
+targetInput.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+targetInput.BorderSizePixel = 0
+targetInput.Font = Enum.Font.Code
+targetInput.TextSize = 11
+targetInput.TextColor3 = Color3.fromRGB(200, 200, 200)
+targetInput.PlaceholderText = "enter username..."
+targetInput.PlaceholderColor3 = Color3.fromRGB(65, 65, 65)
+targetInput.Text = ""
+targetInput.LayoutOrder = 2
+targetInput.ClearTextOnFocus = false
+targetInput.ZIndex = 7
+Instance.new("UICorner", targetInput).CornerRadius = UDim.new(0, 7)
+local targetPad = Instance.new("UIPadding", targetInput)
+targetPad.PaddingLeft = UDim.new(0, 8)
+
+makeDivider(abuseTab, 3)
+
+local function getTarget()
+    local name = targetInput.Text
+    if name == "" then return nil end
+    -- try to find partial match
+    for _, p in Players:GetPlayers() do
+        if p.Name:lower():find(name:lower()) or p.DisplayName:lower():find(name:lower()) then
+            return p.Name
+        end
+    end
+    return name -- use raw if not found
+end
+
+local function sanitize(name)
+    -- trim to 7 chars, replace underscores like command line
+    name = name:gsub("_", ".")
+    return name:sub(1, 7)
+end
+
+-- Individual abuse buttons
+makeBtn(abuseTab, "Oof (kill)", 4, function()
+    local t = getTarget()
+    if not t then setAbuseStatus("enter a target", true) return end
+    sayInChat(";oof " .. sanitize(t))
+    setAbuseStatus("oofed: " .. t)
+end)
+
+makeBtn(abuseTab, "Mute", 5, function()
+    local t = getTarget()
+    if not t then setAbuseStatus("enter a target", true) return end
+    sayInChat(";mute " .. sanitize(t))
+    setAbuseStatus("muted: " .. t)
+end)
+
+makeBtn(abuseTab, "Dumb", 6, function()
+    local t = getTarget()
+    if not t then setAbuseStatus("enter a target", true) return end
+    sayInChat(";dumb " .. sanitize(t))
+    setAbuseStatus("dumbed: " .. t)
+end)
+
+makeBtn(abuseTab, "Myopic", 7, function()
+    local t = getTarget()
+    if not t then setAbuseStatus("enter a target", true) return end
+    sayInChat(";myopic " .. sanitize(t))
+    setAbuseStatus("myopic: " .. t)
+end)
+
+makeBtn(abuseTab, "Blind", 8, function()
+    local t = getTarget()
+    if not t then setAbuseStatus("enter a target", true) return end
+    sayInChat(";blind " .. sanitize(t))
+    setAbuseStatus("blinded: " .. t)
+end)
+
+makeBtn(abuseTab, "Delete Cubes", 9, function()
+    local t = getTarget()
+    if not t then setAbuseStatus("enter a target", true) return end
+    sayInChat(";delcubes " .. sanitize(t))
+    setAbuseStatus("deleted cubes: " .. t)
+end)
+
+makeBtn(abuseTab, "Map Seed NaN", 10, function()
+    sayInChat(";mapseed nan")
+    setAbuseStatus("mapseed nan sent")
+end)
+
+makeDivider(abuseTab, 11)
+
+-- Full abuse combo on target
+makeBtn(abuseTab, "FULL ABUSE (all at once)", 12, function()
+    local t = getTarget()
+    if not t then setAbuseStatus("enter a target", true) return end
+    local sn = sanitize(t)
+    task.spawn(function()
+        setAbuseStatus("abusing: " .. t .. "...")
+        local delay = math.random(2, 3)
+
+        sayInChat(";oof " .. sn)
+        setAbuseStatus("oof sent... waiting")
+        task.wait(math.random(2, 3))
+
+        sayInChat(";mute " .. sn)
+        setAbuseStatus("mute sent... waiting")
+        task.wait(math.random(2, 3))
+
+        sayInChat(";dumb " .. sn)
+        setAbuseStatus("dumb sent... waiting")
+        task.wait(math.random(2, 3))
+
+        sayInChat(";myopic " .. sn)
+        setAbuseStatus("myopic sent... waiting")
+        task.wait(math.random(2, 3))
+
+        sayInChat(";blind " .. sn)
+        setAbuseStatus("blind sent... waiting")
+        task.wait(math.random(2, 3))
+
+        sayInChat(";delcubes " .. sn)
+        setAbuseStatus("delcubes sent... waiting")
+        task.wait(math.random(2, 3))
+
+        sayInChat(";mapseed nan")
+        setAbuseStatus("full abuse done: " .. t)
+    end)
+end)
+
+-- ==================
 -- OPEN / CLOSE
 -- ==================
 local isOpen = false
