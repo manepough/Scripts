@@ -1633,21 +1633,23 @@ makeBtn(stashTab, "Start Stash", 4, function()
 
             if stopstash then break end
 
-            -- freeze clone unfreeze
+            -- freeze clone unfreeze with 1s between each command
             sayInChat(";freeze me")
-            task.wait(0.5)
+            task.wait(1)
             if stopstash then break end
 
             sayInChat(";clone me")
-            task.wait(0.5)
+            task.wait(1)
             if stopstash then break end
 
             sayInChat(";unfreeze me")
+            task.wait(1)
+            if stopstash then break end
 
-            -- move up and wait 5s cooldown between clones
+            -- move up and wait 8s cooldown between clones
             hrp.CFrame = CFrame.new(stashposition + Vector3.new(x, 15, y))
-            setStashStatus("stash " .. i .. "/" .. stashamt .. " — waiting 5s cooldown...")
-            for w = 1, 5 do
+            setStashStatus("stash " .. i .. "/" .. stashamt .. " — waiting 8s cooldown...")
+            for w = 1, 8 do
                 task.wait(1)
                 if stopstash then break end
             end
@@ -1731,73 +1733,135 @@ local function setAbuseStatus(msg, isErr)
     abuseStatus.TextColor3 = isErr and Color3.fromRGB(220,80,80) or Color3.fromRGB(80,200,120)
 end
 
-makeLabel(abuseTab, "target (username / all / a / others / o)", 1)
-local targetInput = Instance.new("TextBox", abuseTab)
-targetInput.Size = UDim2.new(1, 0, 0, 28)
-targetInput.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
-targetInput.BorderSizePixel = 0
-targetInput.Font = Enum.Font.Code
-targetInput.TextSize = 11
-targetInput.TextColor3 = Color3.fromRGB(200, 200, 200)
-targetInput.PlaceholderText = "username / all / a / others / o"
-targetInput.PlaceholderColor3 = Color3.fromRGB(65, 65, 65)
-targetInput.Text = ""
-targetInput.LayoutOrder = 2
-targetInput.ClearTextOnFocus = false
-targetInput.ZIndex = 7
-Instance.new("UICorner", targetInput).CornerRadius = UDim.new(0, 7)
-local targetPad = Instance.new("UIPadding", targetInput)
-targetPad.PaddingLeft = UDim.new(0, 8)
+makeLabel(abuseTab, "select players (multi-select)", 1)
 
-makeDivider(abuseTab, 3)
+-- Player list frame
+local plrListFrame = Instance.new("Frame", abuseTab)
+plrListFrame.Size = UDim2.new(1, 0, 0, 110)
+plrListFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+plrListFrame.BorderSizePixel = 0
+plrListFrame.LayoutOrder = 2
+plrListFrame.ZIndex = 7
+Instance.new("UICorner", plrListFrame).CornerRadius = UDim.new(0, 7)
 
--- returns list of sanitized targets and whether mapseed is allowed
-local function getTargets()
-    local raw = targetInput.Text:lower():gsub("%s+", "")
-    local isAll = raw == "all" or raw == "a"
-    local isOthers = raw == "others" or raw == "o"
-    local isEmpty = raw == ""
-    local targets = {}
-    local mapseedAllowed = isEmpty -- only fire mapseed when no target typed
+local plrListScroll = Instance.new("ScrollingFrame", plrListFrame)
+plrListScroll.Size = UDim2.new(1, 0, 1, 0)
+plrListScroll.BackgroundTransparency = 1
+plrListScroll.BorderSizePixel = 0
+plrListScroll.ScrollBarThickness = 2
+plrListScroll.ScrollBarImageColor3 = Color3.fromRGB(60, 60, 60)
+plrListScroll.ZIndex = 8
+local plrListLayout = Instance.new("UIListLayout", plrListScroll)
+plrListLayout.Padding = UDim.new(0, 2)
+local plrListPad = Instance.new("UIPadding", plrListScroll)
+plrListPad.PaddingLeft = UDim.new(0, 4)
+plrListPad.PaddingRight = UDim.new(0, 4)
+plrListPad.PaddingTop = UDim.new(0, 4)
+plrListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    plrListScroll.CanvasSize = UDim2.new(0, 0, 0, plrListLayout.AbsoluteContentSize.Y + 8)
+end)
 
-    if isEmpty then
-        -- no target = abuse everyone, send mapseed
-        for _, p in Players:GetPlayers() do
-            if p ~= player then
-                local sn = p.Name:gsub("_", "."):sub(1, 7)
-                table.insert(targets, sn)
-            end
-        end
-    elseif isAll then
-        for _, p in Players:GetPlayers() do
-            local sn = p.Name:gsub("_", "."):sub(1, 7)
-            table.insert(targets, sn)
-        end
-    elseif isOthers then
-        for _, p in Players:GetPlayers() do
-            if p ~= player then
-                local sn = p.Name:gsub("_", "."):sub(1, 7)
-                table.insert(targets, sn)
-            end
-        end
-    else
-        -- specific username = no mapseed
-        local found = nil
-        for _, p in Players:GetPlayers() do
-            if p.Name:lower():find(raw) or p.DisplayName:lower():find(raw) then
-                found = p
-                break
-            end
-        end
-        local name = found and found.Name or targetInput.Text
-        table.insert(targets, name:gsub("_", "."):sub(1, 7))
+local selectedPlayers = {}
+local plrBtns = {}
+local allBtn = nil
+
+local function refreshAbusePlayerList()
+    for _, c in plrListScroll:GetChildren() do
+        if c:IsA("TextButton") or c:IsA("TextLabel") then c:Destroy() end
     end
+    plrBtns = {}
+
+    -- > Select All button
+    allBtn = Instance.new("TextButton", plrListScroll)
+    allBtn.Size = UDim2.new(1, 0, 0, 22)
+    allBtn.BackgroundColor3 = selectedPlayers["__ALL__"] and Color3.fromRGB(0, 150, 255) or Color3.fromRGB(30, 30, 30)
+    allBtn.BorderSizePixel = 0
+    allBtn.Font = Enum.Font.GothamBold
+    allBtn.TextSize = 11
+    allBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
+    allBtn.Text = "> Select All"
+    allBtn.ZIndex = 9
+    Instance.new("UICorner", allBtn).CornerRadius = UDim.new(0, 5)
+    allBtn.MouseButton1Click:Connect(function()
+        if selectedPlayers["__ALL__"] then
+            selectedPlayers = {}
+            allBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+            for _, b in plrBtns do b.BackgroundColor3 = Color3.fromRGB(25, 25, 25) end
+        else
+            selectedPlayers = {["__ALL__"] = true}
+            for _, p in Players:GetPlayers() do
+                if p ~= player then selectedPlayers[p.Name] = true end
+            end
+            allBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+            for _, b in plrBtns do b.BackgroundColor3 = Color3.fromRGB(0, 120, 200) end
+        end
+        local count = 0
+        for k in selectedPlayers do if k ~= "__ALL__" then count += 1 end end
+        setAbuseStatus(count .. " selected")
+    end)
+
+    -- individual player buttons
+    for _, p in Players:GetPlayers() do
+        if p == player then continue end
+        local btn = Instance.new("TextButton", plrListScroll)
+        btn.Size = UDim2.new(1, 0, 0, 22)
+        btn.BackgroundColor3 = selectedPlayers[p.Name] and Color3.fromRGB(0, 120, 200) or Color3.fromRGB(25, 25, 25)
+        btn.BorderSizePixel = 0
+        btn.Font = Enum.Font.Gotham
+        btn.TextSize = 11
+        btn.TextColor3 = Color3.fromRGB(200, 200, 200)
+        btn.Text = p.Name
+        btn.ZIndex = 9
+        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+        table.insert(plrBtns, btn)
+        local pname = p.Name
+        btn.MouseButton1Click:Connect(function()
+            if selectedPlayers[pname] then
+                selectedPlayers[pname] = nil
+                selectedPlayers["__ALL__"] = nil
+                btn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+                if allBtn then allBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30) end
+            else
+                selectedPlayers[pname] = true
+                btn.BackgroundColor3 = Color3.fromRGB(0, 120, 200)
+            end
+            local count = 0
+            for k in selectedPlayers do if k ~= "__ALL__" then count += 1 end end
+            setAbuseStatus(count .. " selected")
+        end)
+    end
+end
+
+Players.PlayerAdded:Connect(function() task.wait(0.5) refreshAbusePlayerList() end)
+Players.PlayerRemoving:Connect(function(p)
+    selectedPlayers[p.Name] = nil
+    task.wait(0.2)
+    refreshAbusePlayerList()
+end)
+refreshAbusePlayerList()
+
+makeBtn(abuseTab, "Refresh Player List", 3, function()
+    selectedPlayers = {}
+    refreshAbusePlayerList()
+    setAbuseStatus("list refreshed")
+end)
+
+makeDivider(abuseTab, 4)
+
+local function getTargets()
+    local targets = {}
+    for name, v in selectedPlayers do
+        if name ~= "__ALL__" and v then
+            table.insert(targets, name:gsub("_", "."):sub(1, 7))
+        end
+    end
+    -- mapseed if more than 4 selected
+    local mapseedAllowed = #targets > 4
     return targets, mapseedAllowed
 end
 
--- Single full abuse toggle
 local abuseRunning = false
-makeToggle(abuseTab, "Full Abuse (toggle)", 4, function(state)
+makeToggle(abuseTab, "Full Abuse (toggle)", 5, function(state)
     abuseRunning = state
     if not state then
         setAbuseStatus("abuse stopped")
@@ -1805,54 +1869,45 @@ makeToggle(abuseTab, "Full Abuse (toggle)", 4, function(state)
     end
     local targets, mapseedAllowed = getTargets()
     if #targets == 0 then
-        setAbuseStatus("enter a target first", true)
+        setAbuseStatus("select players first", true)
         abuseRunning = false
         return
     end
     task.spawn(function()
         while abuseRunning do
+            -- TCO supports multi-target: ;oof user1 user2 user3
+            -- chunk into groups of 4 (safe limit per command)
+            local chunks = {}
+            local chunk = {}
             for _, sn in targets do
-                if not abuseRunning then break end
+                table.insert(chunk, sn)
+                if #chunk >= 4 then
+                    table.insert(chunks, table.concat(chunk, " "))
+                    chunk = {}
+                end
+            end
+            if #chunk > 0 then table.insert(chunks, table.concat(chunk, " ")) end
 
-                sayInChat(";oof " .. sn)
-                setAbuseStatus("oof → " .. sn)
-                task.wait(math.random(2, 3))
+            local commands = {"oof", "mute", "dumb", "myopic", "blind", "delcubes"}
+            for _, cmd in commands do
                 if not abuseRunning then break end
-
-                sayInChat(";mute " .. sn)
-                setAbuseStatus("mute → " .. sn)
-                task.wait(math.random(2, 3))
-                if not abuseRunning then break end
-
-                sayInChat(";dumb " .. sn)
-                setAbuseStatus("dumb → " .. sn)
-                task.wait(math.random(2, 3))
-                if not abuseRunning then break end
-
-                sayInChat(";myopic " .. sn)
-                setAbuseStatus("myopic → " .. sn)
-                task.wait(math.random(2, 3))
-                if not abuseRunning then break end
-
-                sayInChat(";blind " .. sn)
-                setAbuseStatus("blind → " .. sn)
-                task.wait(math.random(2, 3))
-                if not abuseRunning then break end
-
-                sayInChat(";delcubes " .. sn)
-                setAbuseStatus("delcubes → " .. sn)
-                task.wait(math.random(2, 3))
-                if not abuseRunning then break end
+                for _, ch in chunks do
+                    if not abuseRunning then break end
+                    sayInChat(";" .. cmd .. " " .. ch)
+                    setAbuseStatus(cmd .. " → " .. ch)
+                    task.wait(1)
+                end
             end
 
-            -- mapseed only fires when no specific target is set
             if mapseedAllowed and abuseRunning then
                 sayInChat(";mapseed nan")
-                setAbuseStatus("mapseed sent — looping...")
-                task.wait(math.random(2, 3))
-            else
-                setAbuseStatus("looping...")
+                setAbuseStatus("mapseed sent (>" .. #targets .. " targets)")
                 task.wait(1)
+            end
+
+            if abuseRunning then
+                setAbuseStatus("looping... (" .. #targets .. " targets)")
+                task.wait(math.random(2, 3))
             end
         end
     end)
@@ -1868,10 +1923,37 @@ micStatus.TextColor3 = Color3.fromRGB(80, 200, 120)
 micStatus.LayoutOrder = 0
 
 local spychatLog = {}
-local spychatRunning = false
-local spychatConn = nil
 
--- Fly toggle (moved here from Deadly)
+-- Always-on spychat using exact command line OnIncomingMessage method
+local tcs = game:GetService("TextChatService")
+local prevOIM = tcs.OnIncomingMessage
+
+tcs.OnIncomingMessage = function(mdata)
+    if prevOIM then pcall(prevOIM, mdata) end
+
+    if mdata.Status ~= Enum.TextChatMessageStatus.Success then return end
+
+    local src = mdata.TextSource
+    if not src then return end
+    local p = Players:GetPlayerByUserId(src.UserId)
+    if not p then return end
+
+    local msg = mdata.Text
+    if not msg or msg == "" then return end
+
+    -- log in format: <playername>: "what they said"
+    local entry = p.Name .. ": \"" .. msg .. "\""
+    table.insert(spychatLog, entry)
+end
+
+-- also catch local player's own chatted
+player.Chatted:Connect(function(msg)
+    if not msg or msg == "" then return end
+    local entry = player.Name .. ": \"" .. msg .. "\""
+    table.insert(spychatLog, entry)
+end)
+
+-- Fly toggle
 makeDivider(micTab, 1)
 makeLabel(micTab, "movement", 2)
 makeToggle(micTab, "Fly", 3, function(state)
@@ -1894,120 +1976,24 @@ makeToggle(micTab, "Fly", 3, function(state)
 end)
 
 makeDivider(micTab, 4)
-makeLabel(micTab, "spy chat", 5)
-
--- Spy chat log display
-local logFrame = Instance.new("ScrollingFrame", micTab)
-logFrame.Size = UDim2.new(1, 0, 0, 120)
-logFrame.BackgroundColor3 = Color3.fromRGB(14, 14, 14)
-logFrame.BorderSizePixel = 0
-logFrame.ScrollBarThickness = 2
-logFrame.ScrollBarImageColor3 = Color3.fromRGB(60, 60, 60)
-logFrame.LayoutOrder = 6
-logFrame.ZIndex = 7
-Instance.new("UICorner", logFrame).CornerRadius = UDim.new(0, 7)
-local logLayout = Instance.new("UIListLayout", logFrame)
-logLayout.Padding = UDim.new(0, 2)
-logLayout.SortOrder = Enum.SortOrder.LayoutOrder
-local logPad = Instance.new("UIPadding", logFrame)
-logPad.PaddingLeft = UDim.new(0, 6)
-logPad.PaddingRight = UDim.new(0, 6)
-logPad.PaddingTop = UDim.new(0, 4)
-logLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    logFrame.CanvasSize = UDim2.new(0, 0, 0, logLayout.AbsoluteContentSize.Y + 8)
-    logFrame.CanvasPosition = Vector2.new(0, logLayout.AbsoluteContentSize.Y)
-end)
-
-local function addLogEntry(plrName, msg, isHidden)
-    local prefix = isHidden and "[HIDDEN] " or ""
-    local entry = prefix .. plrName .. ": \"" .. msg .. "\""
-    table.insert(spychatLog, entry)
-
-    local lbl = Instance.new("TextLabel", logFrame)
-    lbl.Size = UDim2.new(1, 0, 0, 14)
-    lbl.BackgroundTransparency = 1
-    lbl.Font = Enum.Font.Code
-    lbl.TextSize = 10
-    lbl.TextColor3 = isHidden and Color3.fromRGB(255, 80, 80) or Color3.fromRGB(180, 180, 180)
-    lbl.Text = entry
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-    lbl.TextTruncate = Enum.TextTruncate.AtEnd
-    lbl.ZIndex = 8
-    lbl.LayoutOrder = #spychatLog
-end
-
--- Spy chat toggle
-local prevOIM = nil
-makeToggle(micTab, "Spy Chat (silent + whispers)", 7, function(state)
-    spychatRunning = state
-    local tcs = game:GetService("TextChatService")
-    if state then
-        -- save existing handler
-        prevOIM = tcs.OnIncomingMessage
-
-        -- hook exactly like command line oim
-        tcs.OnIncomingMessage = function(mdata)
-            -- call original if exists
-            if prevOIM then pcall(prevOIM, mdata) end
-
-            local src = mdata.TextSource
-            if not src then return end
-            local p = Players:GetPlayerByUserId(src.UserId)
-            if not p or p == player then return end
-
-            local msg = mdata.Text
-            if not msg or msg == "" then return end
-
-            local isHidden = msg:sub(1,1) == ";"
-                or mdata.TextChannel and mdata.TextChannel.Name:find("RBXWhisper")
-
-            -- log it
-            addLogEntry(p.Name, msg, isHidden)
-
-            -- display in RBXGeneral chat so we can see it in game
-            if isHidden then
-                pcall(function()
-                    tcs.TextChannels.RBXGeneral:DisplaySystemMessage(
-                        string.format("[SPY] %s: %s", p.Name, msg)
-                    )
-                end)
-            end
-        end
-
-        micStatus.Text = "spying..."
-    else
-        -- restore original
-        if prevOIM then
-            tcs.OnIncomingMessage = prevOIM
-            prevOIM = nil
-        else
-            tcs.OnIncomingMessage = nil
-        end
-        micStatus.Text = "spy chat off"
-    end
-end)
-
-makeDivider(micTab, 8)
+makeLabel(micTab, "spy chat log", 5)
 
 -- Download log
-makeBtn(micTab, "Download Chat Log", 9, function()
+makeBtn(micTab, "Download Chat Log", 6, function()
     if #spychatLog == 0 then
-        micStatus.Text = "no messages yet"
+        micStatus.Text = "no messages logged yet"
         return
     end
     local content = table.concat(spychatLog, "\n")
     pcall(function()
         writefile("ManesHubChatLog.txt", content)
-        micStatus.Text = "saved to ManesHubChatLog.txt"
+        micStatus.Text = "saved! " .. #spychatLog .. " messages"
     end)
 end)
 
 -- Clear log
-makeBtn(micTab, "Clear Log", 10, function()
+makeBtn(micTab, "Clear Log", 7, function()
     spychatLog = {}
-    for _, c in logFrame:GetChildren() do
-        if c:IsA("TextLabel") then c:Destroy() end
-    end
     micStatus.Text = "log cleared"
 end)
 
