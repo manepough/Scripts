@@ -499,6 +499,9 @@ swatch1.BorderSizePixel = 0
 swatch1.Text = ""
 swatch1.ZIndex = 8
 Instance.new("UICorner", swatch1).CornerRadius = UDim.new(0, 5)
+local sw1Stroke = Instance.new("UIStroke", swatch1)
+sw1Stroke.Color = Color3.fromRGB(255, 255, 255)
+sw1Stroke.Thickness = 1.5
 
 local swatch2 = Instance.new("TextButton", colorRow)
 swatch2.Size = UDim2.new(0, 22, 0, 22)
@@ -508,21 +511,21 @@ swatch2.BorderSizePixel = 0
 swatch2.Text = ""
 swatch2.ZIndex = 8
 Instance.new("UICorner", swatch2).CornerRadius = UDim.new(0, 5)
-local swatch2Stroke = Instance.new("UIStroke", swatch2)
-swatch2Stroke.Color = Color3.fromRGB(80, 80, 80)
-swatch2Stroke.Thickness = 1
+local sw2Stroke = Instance.new("UIStroke", swatch2)
+sw2Stroke.Color = Color3.fromRGB(255, 255, 255)
+sw2Stroke.Thickness = 1.5
 
 local presets = {
-    Color3.fromRGB(255,0,127),
-    Color3.fromRGB(0,0,0),
-    Color3.fromRGB(255,255,255),
-    Color3.fromRGB(255,0,0),
-    Color3.fromRGB(0,255,0),
-    Color3.fromRGB(0,0,255),
-    Color3.fromRGB(255,165,0),
-    Color3.fromRGB(128,0,255),
-    Color3.fromRGB(0,255,255),
-    Color3.fromRGB(255,255,0),
+    Color3.fromRGB(255, 0, 127),
+    Color3.fromRGB(0, 0, 0),
+    Color3.fromRGB(255, 255, 255),
+    Color3.fromRGB(255, 0, 0),
+    Color3.fromRGB(0, 255, 0),
+    Color3.fromRGB(0, 0, 255),
+    Color3.fromRGB(255, 165, 0),
+    Color3.fromRGB(128, 0, 255),
+    Color3.fromRGB(0, 255, 255),
+    Color3.fromRGB(255, 255, 0),
 }
 
 local pickerPopup = Instance.new("Frame", screenGui)
@@ -533,8 +536,8 @@ pickerPopup.Visible = false
 pickerPopup.ZIndex = 30
 Instance.new("UICorner", pickerPopup).CornerRadius = UDim.new(0, 8)
 local ppStroke = Instance.new("UIStroke", pickerPopup)
-ppStroke.Color = Color3.fromRGB(60, 60, 60)
-ppStroke.Thickness = 1
+ppStroke.Color = Color3.fromRGB(255, 255, 255)
+ppStroke.Thickness = 1.5
 
 local ppGrid = Instance.new("Frame", pickerPopup)
 ppGrid.Size = UDim2.new(1, -10, 1, -10)
@@ -548,6 +551,7 @@ ppLayout.CellPadding = UDim2.new(0, 3, 0, 3)
 ppLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
 local activeSwatch = nil
+local pickerJustOpened = false
 
 for i, col in presets do
     local dot = Instance.new("TextButton", ppGrid)
@@ -558,6 +562,9 @@ for i, col in presets do
     dot.ZIndex = 32
     dot.LayoutOrder = i
     Instance.new("UICorner", dot).CornerRadius = UDim.new(0, 4)
+    local dotStroke = Instance.new("UIStroke", dot)
+    dotStroke.Color = Color3.fromRGB(255, 255, 255)
+    dotStroke.Thickness = 1
     dot.MouseButton1Click:Connect(function()
         if activeSwatch == 1 then
             glitchColor1 = col
@@ -575,13 +582,18 @@ local function showPicker(swatchNum, btn)
     local absPos = btn.AbsolutePosition
     pickerPopup.Position = UDim2.new(0, absPos.X - 180, 0, absPos.Y - 70)
     pickerPopup.Visible = true
+    pickerJustOpened = true
+    task.delay(0.05, function() pickerJustOpened = false end)
 end
 
 swatch1.MouseButton1Click:Connect(function() showPicker(1, swatch1) end)
 swatch2.MouseButton1Click:Connect(function() showPicker(2, swatch2) end)
 
+-- close picker only when clicking outside, not on the same frame it opened
 UserInputService.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+    if pickerJustOpened then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
         pickerPopup.Visible = false
     end
 end)
@@ -592,11 +604,12 @@ makeToggle(deadlyTab, "Glitch blocks", 6, function(state)
     task.spawn(function()
         while glitchRunning do
             local paints = findbtools("Paint")
-            if #paints == 0 then task.wait(0.3) continue end
+            if #paints == 0 then task.wait(0.5) continue end
 
             local cfolder = workspace:FindFirstChild("Bricks")
-            if not cfolder then task.wait(0.3) continue end
+            if not cfolder then task.wait(0.5) continue end
 
+            -- collect all bricks once per loop
             local bricks = {}
             for _, v in cfolder:GetDescendants() do
                 if v:IsA("BasePart") then
@@ -604,10 +617,12 @@ makeToggle(deadlyTab, "Glitch blocks", 6, function(state)
                 end
             end
 
-            local colorIndex = (math.floor(tick() * 10) % 2) + 1
-            local col = colorIndex == 1 and glitchColor1 or glitchColor2
+            if #bricks == 0 then task.wait(0.5) continue end
 
+            local colorIndex = (math.floor(tick() * 5) % 2) + 1
+            local col = colorIndex == 1 and glitchColor1 or glitchColor2
             local pt = paints[1]
+
             for _, v in bricks do
                 if not glitchRunning then break end
                 if v and v.Parent then
@@ -622,9 +637,10 @@ makeToggle(deadlyTab, "Glitch blocks", 6, function(state)
                             ""
                         )
                     end)
+                    task.wait(0.02) -- small wait between each block to prevent lag
                 end
             end
-            task.wait(0.1)
+            task.wait(0.3)
         end
     end)
 end)
@@ -1927,57 +1943,80 @@ local spychatLog = {}
 -- Always-on spychat + status detection using command line method
 local tcs = game:GetService("TextChatService")
 
+-- name colors matching command line exactly
+local namecolors = {
+    peasant = Color3.fromRGB(150, 103, 102),  -- brown
+    arken   = Color3.fromRGB(4, 175, 236),    -- blue (has enlighten)
+    admin   = Color3.fromRGB(245, 205, 48),   -- yellow
+    hidden  = Color3.fromRGB(255, 0, 0),      -- red (muted/silent)
+    iqdumb  = Color3.fromRGB(200, 0, 0),      -- dark red (dumb)
+}
+
+local function colorToHex(c)
+    return string.format("#%02x%02x%02x",
+        math.round(c.R*255), math.round(c.G*255), math.round(c.B*255))
+end
+
+local function hasArken(p)
+    return p:GetAttribute("Arken") == true
+        or p.Backpack:FindFirstChild("The Arkenstone") ~= nil
+        or (p.Character and p.Character:FindFirstChild("The Arkenstone") ~= nil)
+end
+
+local function isAdmin(p)
+    return p.Neutral == false
+end
+
 tcs.OnIncomingMessage = function(mdata)
     local src = mdata.TextSource
     if not src then return end
     local p = Players:GetPlayerByUserId(src.UserId)
     if not p then return end
 
-    local msg = mdata.Text
-    if not msg or msg == "" then return end
+    local msg = mdata.Text or ""
 
-    -- detect status flags like command line
-    local isHidden = msg:sub(1,1) == ";"
-    local isMuted = p:HasTag("Muted")
-    local iq = p:GetAttribute("IQ")
-    local isDumb = iq and iq <= 50
-    local isGenius = iq and iq >= 200
-    local isWhisper = mdata.TextChannel and tostring(mdata.TextChannel.Name):find("RBXWhisper") ~= nil
+    -- detect status
+    local isHidden = msg:sub(1, 1) == ";"
+    local isMuted  = p:HasTag("Muted")
+    local iq       = p:GetAttribute("IQ")
+    local isDumb   = iq and iq <= 50
+    local isWhisper = mdata.TextChannel
+        and tostring(mdata.TextChannel.Name):find("RBXWhisper") ~= nil
 
-    -- build suffix tags (no color change for normal messages)
+    -- pick name color category
+    local cn
+    if isMuted or isHidden or isWhisper then
+        cn = "hidden"
+    elseif isDumb then
+        cn = "iqdumb"
+    elseif hasArken(p) then
+        cn = "arken"
+    elseif isAdmin(p) then
+        cn = "admin"
+    else
+        cn = "peasant"
+    end
+
+    local col = namecolors[cn]
+    local hex = colorToHex(col)
+
+    -- build status suffix tags
     local tags = ""
-    if isMuted then tags = tags .. "(muted)" end
-    if isDumb then tags = tags .. "(dumb)" end
-    if isHidden then tags = tags .. "(silent)" end
+    if isMuted   then tags = tags .. "(muted)" end
+    if isDumb    then tags = tags .. "(dumb)" end
+    if isHidden  then tags = tags .. "(silent)" end
     if isWhisper then tags = tags .. "(whisper)" end
 
-    -- only modify PrefixText if there's a status to show
-    if tags ~= "" then
-        -- keep original name color but append red status tag
-        local origPrefix = mdata.PrefixText or ""
-        -- insert status tag in red before the colon
-        mdata.PrefixText = origPrefix:gsub("(%[.-)%]", function(name)
-            return name .. " <font color='#ff4444'>" .. tags .. "</font>]"
-        end)
-        -- fallback if prefix didn't match bracket format
-        if mdata.PrefixText == origPrefix then
-            mdata.PrefixText = origPrefix .. " <font color='#ff4444'>" .. tags .. "</font>"
-        end
-    end
-
-    -- hide silent commands from chat visually but still log them
-    if isHidden and mdata.Status == Enum.TextChatMessageStatus.Success then
-        -- log before hiding
-        local entry = p.Name .. tags .. ": \"" .. msg .. "\""
-        table.insert(spychatLog, entry)
-        return
-    end
-
-    if mdata.Status ~= Enum.TextChatMessageStatus.Success then return end
+    -- set prefix with colored name + red status tags
+    local displayName = p.DisplayName
+    local tagHtml = tags ~= "" and (" <font color='#ff4444'>" .. tags .. "</font>") or ""
+    mdata.PrefixText = "<font color='" .. hex .. "'>[" .. displayName .. tagHtml .. "]: </font>"
 
     -- log everything
-    local entry = p.Name .. (tags ~= "" and " " .. tags or "") .. ": \"" .. msg .. "\""
-    table.insert(spychatLog, entry)
+    if msg ~= "" then
+        local entry = p.Name .. (tags ~= "" and " " .. tags or "") .. ": \"" .. msg .. "\""
+        table.insert(spychatLog, entry)
+    end
 end
 
 -- also log local player's own messages
