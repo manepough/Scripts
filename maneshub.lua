@@ -1924,12 +1924,10 @@ micStatus.LayoutOrder = 0
 
 local spychatLog = {}
 
--- Always-on spychat using exact command line OnIncomingMessage method
+-- Always-on spychat + status detection using command line method
 local tcs = game:GetService("TextChatService")
 
 tcs.OnIncomingMessage = function(mdata)
-    if mdata.Status ~= Enum.TextChatMessageStatus.Success then return end
-
     local src = mdata.TextSource
     if not src then return end
     local p = Players:GetPlayerByUserId(src.UserId)
@@ -1938,12 +1936,51 @@ tcs.OnIncomingMessage = function(mdata)
     local msg = mdata.Text
     if not msg or msg == "" then return end
 
-    -- log in format: <playername>: "what they said"
-    local entry = p.Name .. ": \"" .. msg .. "\""
+    -- detect status flags like command line
+    local isHidden = msg:sub(1,1) == ";"
+    local isMuted = p:HasTag("Muted")
+    local iq = p:GetAttribute("IQ")
+    local isDumb = iq and iq <= 50
+    local isGenius = iq and iq >= 200
+    local isWhisper = mdata.TextChannel and tostring(mdata.TextChannel.Name):find("RBXWhisper") ~= nil
+
+    -- build suffix tags (no color change for normal messages)
+    local tags = ""
+    if isMuted then tags = tags .. "(muted)" end
+    if isDumb then tags = tags .. "(dumb)" end
+    if isHidden then tags = tags .. "(silent)" end
+    if isWhisper then tags = tags .. "(whisper)" end
+
+    -- only modify PrefixText if there's a status to show
+    if tags ~= "" then
+        -- keep original name color but append red status tag
+        local origPrefix = mdata.PrefixText or ""
+        -- insert status tag in red before the colon
+        mdata.PrefixText = origPrefix:gsub("(%[.-)%]", function(name)
+            return name .. " <font color='#ff4444'>" .. tags .. "</font>]"
+        end)
+        -- fallback if prefix didn't match bracket format
+        if mdata.PrefixText == origPrefix then
+            mdata.PrefixText = origPrefix .. " <font color='#ff4444'>" .. tags .. "</font>"
+        end
+    end
+
+    -- hide silent commands from chat visually but still log them
+    if isHidden and mdata.Status == Enum.TextChatMessageStatus.Success then
+        -- log before hiding
+        local entry = p.Name .. tags .. ": \"" .. msg .. "\""
+        table.insert(spychatLog, entry)
+        return
+    end
+
+    if mdata.Status ~= Enum.TextChatMessageStatus.Success then return end
+
+    -- log everything
+    local entry = p.Name .. (tags ~= "" and " " .. tags or "") .. ": \"" .. msg .. "\""
     table.insert(spychatLog, entry)
 end
 
--- also catch local player's own chatted
+-- also log local player's own messages
 player.Chatted:Connect(function(msg)
     if not msg or msg == "" then return end
     local entry = player.Name .. ": \"" .. msg .. "\""
