@@ -1926,11 +1926,8 @@ local spychatLog = {}
 
 -- Always-on spychat using exact command line OnIncomingMessage method
 local tcs = game:GetService("TextChatService")
-local prevOIM = tcs.OnIncomingMessage
 
 tcs.OnIncomingMessage = function(mdata)
-    if prevOIM then pcall(prevOIM, mdata) end
-
     if mdata.Status ~= Enum.TextChatMessageStatus.Success then return end
 
     local src = mdata.TextSource
