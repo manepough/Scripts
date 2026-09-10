@@ -6,7 +6,56 @@ local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
+
+-- ==================
+-- WHITELIST
+-- ==================
+local whitelist = {
+    10429099415,
+    8891263921,
+    3106404044,
+    1968988470,
+}
+
+local function isWhitelisted()
+    if #whitelist == 0 then return true end
+    for _, id in whitelist do
+        if player.UserId == id then return true end
+    end
+    return false
+end
+
+if not isWhitelisted() then
+    player:Kick("ur not whitelisted ik Sebastian gave u this broo")
+    return
+end
+
 local mouse = player:GetMouse()
+
+local function sayInChat(text)
+    coroutine.wrap(function()
+        game:GetService("TextChatService").TextChannels.RBXGeneral:SendAsync(text)
+    end)()
+end
+
+local function makeBtn(parent, text, order, callback)
+    local btn = Instance.new("TextButton", parent)
+    btn.Size = UDim2.new(1, 0, 0, 30)
+    btn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    btn.BorderSizePixel = 0
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 11
+    btn.TextColor3 = Color3.fromRGB(200, 200, 200)
+    btn.Text = text
+    btn.LayoutOrder = order or 0
+    btn.ZIndex = 7
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 7)
+    local st = Instance.new("UIStroke", btn)
+    st.Color = Color3.fromRGB(45, 45, 45)
+    st.Thickness = 1
+    btn.MouseButton1Click:Connect(callback)
+    return btn
+end
 
 -- ScreenGui
 local screenGui = Instance.new("ScreenGui")
@@ -371,6 +420,183 @@ makeLabel(mainTab, "team", 16)
 makeValue(mainTab, player.Team and player.Team.Name or "none", 17)
 
 -- ==================
+-- DETECTION TAB
+-- ==================
+local detectTab = createTab("Detection")
+
+makeLabel(detectTab, "detections – sends alerts in chat", 1)
+makeDivider(detectTab, 2)
+
+local detectConns = {}
+local function clearDetectConn(name)
+    if detectConns[name] then
+        pcall(function() detectConns[name]:Disconnect() end)
+        detectConns[name] = nil
+    end
+end
+
+-- Silent/muted message detector
+makeToggle(detectTab, "Silent / Muted Detector", 3, function(state)
+    clearDetectConn("SilentDetect")
+    if not state then return end
+    local tcs2 = game:GetService("TextChatService")
+    detectConns["SilentDetect"] = tcs2.MessageReceived:Connect(function(mdata)
+        local src = mdata.TextSource
+        if not src then return end
+        local p = game:GetService("Players"):GetPlayerByUserId(src.UserId)
+        if not p or p == player then return end
+        local msg = mdata.Text or ""
+        if msg == "" then return end
+        local isSilent  = msg:sub(1,1) == ";"
+        local isMuted   = p:HasTag("Muted")
+        local isWhisper = mdata.TextChannel
+            and tostring(mdata.TextChannel.Name):find("RBXWhisper") ~= nil
+        if isSilent or isMuted or isWhisper then
+            sayInChat(p.Name .. ": " .. msg)
+        end
+    end)
+end)
+
+makeDivider(detectTab, 4)
+
+-- Grief detection
+local griefers = {}
+makeToggle(detectTab, "Grief Detection", 5, function(state)
+    clearDetectConn("Grief")
+    griefers = {}
+    if not state then return end
+    local bricks = workspace:FindFirstChild("Bricks")
+    if not bricks then return end
+
+    local function watchFolder(plrFolder)
+        local ownerName = plrFolder.Name
+        -- track children before removal so we can verify
+        local counts = { remove = 0, paint = 0 }
+        griefers[ownerName] = counts
+
+        -- ChildRemoved fires on the OWNER's folder
+        -- we detect the actual deleter by checking who's using delete tool
+        detectConns["Grief_rem_" .. ownerName] = plrFolder.ChildRemoved:Connect(function(removedBlock)
+            -- find who deleted it: check all players for equipped Delete tool
+            local deleterName = nil
+            for _, plr in ipairs(game:GetService("Players"):GetPlayers()) do
+                if plr.Name ~= ownerName then -- not the block owner
+                    local char = plr.Character
+                    if char then
+                        local tool = char:FindFirstChildOfClass("Tool")
+                        if tool and (tool.Name == "Delete" or tool.Name == "Erase" or tool.Name == "Remove") then
+                            deleterName = plr.Name
+                            break
+                        end
+                    end
+                end
+            end
+            -- only count if a non-owner deleted it
+            if deleterName then
+                counts.remove = counts.remove + 1
+                if counts.remove >= 3 then
+                    counts.remove = 0
+                    sayInChat(deleterName .. " is griefing " .. ownerName .. " (deleted blocks)")
+                end
+            end
+        end)
+
+        -- paint detection: only flag if someone other than owner has paint tool equipped
+        detectConns["Grief_paint_" .. ownerName] = plrFolder.DescendantChanged:Connect(function(desc, prop)
+            if prop ~= "Color" and prop ~= "BrickColor" then return end
+            local deleterName = nil
+            for _, plr in ipairs(game:GetService("Players"):GetPlayers()) do
+                if plr.Name ~= ownerName then
+                    local char = plr.Character
+                    if char then
+                        local tool = char:FindFirstChildOfClass("Tool")
+                        if tool and (tool.Name == "Paint" or tool.Name == "Color") then
+                            deleterName = plr.Name
+                            break
+                        end
+                    end
+                end
+            end
+            if deleterName then
+                counts.paint = counts.paint + 1
+                if counts.paint >= 3 then
+                    counts.paint = 0
+                    sayInChat(deleterName .. " is griefing " .. ownerName .. " (painting blocks)")
+                end
+            end
+        end)
+    end
+
+    for _, plrFolder in ipairs(bricks:GetChildren()) do
+        watchFolder(plrFolder)
+    end
+    detectConns["Grief_new"] = bricks.ChildAdded:Connect(function(plrFolder)
+        watchFolder(plrFolder)
+    end)
+end)
+
+-- Enlighten alarm
+local enlightenAlerted = {}
+makeToggle(detectTab, "Enlighten Alarm", 6, function(state)
+    clearDetectConn("Enlighten")
+    enlightenAlerted = {}
+    if not state then return end
+    detectConns["Enlighten"] = game:GetService("RunService").Heartbeat:Connect(function()
+        for _, plr in ipairs(game:GetService("Players"):GetPlayers()) do
+            if plr ~= player and not enlightenAlerted[plr.Name] then
+                local char = plr.Character
+                if char then
+                    local hasEnli = char:FindFirstChild("The Arkenstone") or plr.Backpack:FindFirstChild("The Arkenstone")
+                    if hasEnli then
+                        enlightenAlerted[plr.Name] = true
+                        sayInChat(plr.Name .. " has the Arkenstone")
+                    end
+                end
+            end
+        end
+    end)
+end)
+
+-- Lag machine detector — 15 blocks per second threshold
+local buildCounts = {}
+makeToggle(detectTab, "Lag Machine Detector", 7, function(state)
+    clearDetectConn("LagMachine")
+    buildCounts = {}
+    if not state then return end
+    local bricks = workspace:FindFirstChild("Bricks")
+    if not bricks then return end
+    local function watchBuilder(plrFolder)
+        if plrFolder.Name == player.Name then return end
+        local name = plrFolder.Name
+        buildCounts[name] = { times = {}, cooldownUntil = 0 }
+        detectConns["Lag_" .. name] = plrFolder.ChildAdded:Connect(function()
+            local t = tick()
+            local data = buildCounts[name]
+            if not data then return end
+            -- skip if on cooldown
+            if t < data.cooldownUntil then return end
+            table.insert(data.times, t)
+            -- keep only last 1.5 seconds
+            while #data.times > 0 and (t - data.times[1]) > 1.5 do
+                table.remove(data.times, 1)
+            end
+            -- 10+ blocks in 1.5s = lag machine
+            if #data.times >= 10 then
+                data.times = {}
+                data.cooldownUntil = t + 10 -- 10s cooldown for this player
+                sayInChat(name .. " possible building lag machine or hacking")
+            end
+        end)
+    end
+    for _, plrFolder in ipairs(bricks:GetChildren()) do
+        watchBuilder(plrFolder)
+    end
+    detectConns["Lag_new"] = bricks.ChildAdded:Connect(function(plrFolder)
+        watchBuilder(plrFolder)
+    end)
+end)
+
+-- ==================
 -- DEADLY TAB
 -- ==================
 local deadlyTab = createTab("Deadly")
@@ -602,14 +828,35 @@ makeToggle(deadlyTab, "Glitch blocks", 6, function(state)
     glitchRunning = state
     if not state then return end
     task.spawn(function()
+        -- find paint event more reliably
+        local function getPaintEvent()
+            local function search(parent)
+                for _, v in parent:GetChildren() do
+                    if v:IsA("Tool") and v.Name == "Paint" then
+                        -- search all scripts inside
+                        for _, s in v:GetDescendants() do
+                            if (s:IsA("Script") or s:IsA("LocalScript") or s:IsA("ModuleScript")) then
+                                local ev = s:FindFirstChild("Event")
+                                if ev then return ev end
+                            end
+                        end
+                        -- also try direct child named Event
+                        local ev = v:FindFirstChild("Event", true)
+                        if ev then return ev end
+                    end
+                end
+                return nil
+            end
+            return search(player.Backpack) or (player.Character and search(player.Character))
+        end
+
         while glitchRunning do
-            local paints = findbtools("Paint")
-            if #paints == 0 then task.wait(0.5) continue end
+            local paintEvent = getPaintEvent()
+            if not paintEvent then task.wait(0.5) continue end
 
             local cfolder = workspace:FindFirstChild("Bricks")
             if not cfolder then task.wait(0.5) continue end
 
-            -- collect all bricks once per loop
             local bricks = {}
             for _, v in cfolder:GetDescendants() do
                 if v:IsA("BasePart") then
@@ -619,15 +866,18 @@ makeToggle(deadlyTab, "Glitch blocks", 6, function(state)
 
             if #bricks == 0 then task.wait(0.5) continue end
 
-            local colorIndex = (math.floor(tick() * 5) % 2) + 1
+            -- alternate color every loop pass
+            local colorIndex = (math.floor(tick() * 3) % 2) + 1
             local col = colorIndex == 1 and glitchColor1 or glitchColor2
-            local pt = paints[1]
 
+            -- fire all blocks fast using task.defer so it doesn't block
+            local batch = 0
             for _, v in bricks do
                 if not glitchRunning then break end
                 if v and v.Parent then
+                    batch += 1
                     pcall(function()
-                        pt.e:FireServer(
+                        paintEvent:FireServer(
                             v,
                             Enum.NormalId.Top,
                             v.Position,
@@ -637,14 +887,241 @@ makeToggle(deadlyTab, "Glitch blocks", 6, function(state)
                             ""
                         )
                     end)
-                    task.wait(0.02) -- small wait between each block to prevent lag
+                    -- yield every 10 blocks to avoid freezing
+                    if batch % 10 == 0 then
+                        task.wait()
+                    end
                 end
             end
-            task.wait(0.3)
+            task.wait(0.15)
         end
     end)
 end)
 
+
+makeDivider(deadlyTab, 7)
+makeLabel(deadlyTab, "server crash", 8)
+
+local shutdownRunning = false
+makeToggle(deadlyTab, "Shutdown Server (keep clicking screen)", 9, function(state)
+    shutdownRunning = state
+    if not state then return end
+    task.spawn(function()
+
+        -- helper: find a tool by name anywhere in backpack or character
+        local function findTool(name)
+            for _, v in player.Backpack:GetChildren() do
+                if v:IsA("Tool") and v.Name == name then return v end
+            end
+            if player.Character then
+                for _, v in player.Character:GetChildren() do
+                    if v:IsA("Tool") and v.Name == name then return v end
+                end
+            end
+            return nil
+        end
+
+        -- helper: equip a tool (move to character)
+        local function equipTool(tool)
+            pcall(function()
+                if player.Character then
+                    tool.Parent = player.Character
+                end
+            end)
+            task.wait(0.3)
+        end
+
+        -- helper: unequip all tools back to backpack
+        local function unequipAll()
+            if not player.Character then return end
+            for _, v in player.Character:GetChildren() do
+                if v:IsA("Tool") then
+                    pcall(function() v.Parent = player.Backpack end)
+                end
+            end
+            task.wait(0.2)
+        end
+
+        -- STEP 1: equip Arkenstone (enlighten)
+        local arken = findTool("The Arkenstone")
+        if arken then equipTool(arken) end
+        task.wait(0.3)
+
+        -- STEP 2: gear me the sword
+        sayInChat(";gear me 261439002.1")
+        task.wait(1)
+        task.wait(2)
+
+        -- STEP 3: re-equip Arkenstone only (not the gear)
+        unequipAll()
+        arken = findTool("The Arkenstone")
+        if arken then equipTool(arken) end
+        task.wait(0.3)
+
+        -- STEP 4: freeze o then bring a
+        sayInChat(";freeze o")
+        task.wait(1)
+        sayInChat(";bring a")
+        task.wait(1)
+        task.wait(2)
+
+        -- STEP 5: find WintersGreatSword and equip it
+        local gearTool = nil
+        for attempt = 1, 20 do
+            gearTool = player.Backpack:FindFirstChild("WintersGreatSword")
+            if gearTool then break end
+            task.wait(0.3)
+        end
+
+        if gearTool then
+            unequipAll()
+            equipTool(gearTool)
+        end
+        task.wait(0.3)
+
+        -- STEP 6: activate the gear skill (Ice Stalag circle button)
+        if gearTool then
+            pcall(function()
+                gearTool:Activate()
+            end)
+        end
+        task.wait(0.5)
+
+        -- STEP 7: re-equip Arkenstone
+        unequipAll()
+        arken = findTool("The Arkenstone")
+        if arken then equipTool(arken) end
+        task.wait(0.3)
+
+        -- STEP 8: clone a as many times as possible
+        while shutdownRunning do
+            sayInChat(";clone a")
+            task.wait(1)
+        end
+    end)
+end)
+
+makeDivider(deadlyTab, 10)
+makeLabel(deadlyTab, "lag machine", 11)
+
+-- Lag Machine
+local lagRunning = false
+makeToggle(deadlyTab, "Lag Machine", 12, function(state)
+    lagRunning = state
+    if not state then return end
+    task.spawn(function()
+        local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        local basePos = hrp.Position + Vector3.new(0, 4, 0)
+
+        -- 1. build the detailed block once
+        local buildEvent = getBackpackEvent("Build")
+        if not buildEvent then return end
+        pcall(function() buildEvent:FireServer(workspace.Terrain, Enum.NormalId.Top, basePos, "detailed") end)
+        task.wait(0.3)
+
+        -- find the block we just placed
+        local myFolder = workspace:FindFirstChild("Bricks") and workspace.Bricks:FindFirstChild(player.Name)
+        if not myFolder then return end
+        local block = nil
+        for _, v in ipairs(myFolder:GetChildren()) do
+            if v:IsA("BasePart") and (v.Position - basePos).Magnitude < 6 then
+                block = v break
+            end
+        end
+        if not block then return end
+
+        -- 2. paint all 6 sides with random spray text
+        local paintEvent = getBackpackEvent("Paint")
+        local sides = {
+            Enum.NormalId.Top, Enum.NormalId.Bottom,
+            Enum.NormalId.Front, Enum.NormalId.Back,
+            Enum.NormalId.Left, Enum.NormalId.Right,
+        }
+        if paintEvent then
+            for _, side in ipairs(sides) do
+                local randTxt = tostring(math.random(10000000, 99999999))
+                pcall(function()
+                    paintEvent:FireServer(
+                        block,
+                        side,
+                        block.Position + block.Size / 2,
+                        "both \xF0\x9F\xA4\x9D",
+                        Color3.new(0.251, 0.251, 0.251),
+                        "spray",
+                        randTxt
+                    )
+                end)
+                task.wait(0.05)
+            end
+        end
+        task.wait(0.1)
+
+        -- 3. repeatedly clone block then delete clone on same block
+        while lagRunning and block and block.Parent do
+            -- clone
+            pcall(function() block:Clone().Parent = myFolder end)
+            task.wait(0.1)
+            -- delete the newest duplicate (not our original)
+            for _, v in ipairs(myFolder:GetChildren()) do
+                if v ~= block and v:IsA("BasePart") and (v.Position - block.Position).Magnitude < 2 then
+                    local deleteEvent = getBackpackEvent("Delete")
+                    if deleteEvent then
+                        pcall(function()
+                            deleteEvent:FireServer(v, Enum.NormalId.Top, v.Position)
+                        end)
+                    end
+                    break
+                end
+            end
+            task.wait(0.1)
+        end
+    end)
+end)
+
+makeDivider(deadlyTab, 13)
+makeLabel(deadlyTab, "anti lag machine", 14)
+
+-- Anti Lag Machine
+makeBtn(deadlyTab, "Clean Lag Machine Blocks", 15, function()
+    task.spawn(function()
+        local bricks = workspace:FindFirstChild("Bricks")
+        if not bricks then return end
+        -- group all blocks by rounded position
+        local posMap = {}
+        for _, folder in ipairs(bricks:GetChildren()) do
+            for _, block in ipairs(folder:GetChildren()) do
+                if block:IsA("BasePart") then
+                    local p = block.Position
+                    local key = math.round(p.X) .. "_" .. math.round(p.Y) .. "_" .. math.round(p.Z)
+                    if not posMap[key] then posMap[key] = {} end
+                    table.insert(posMap[key], block)
+                end
+            end
+        end
+        -- delete duplicates at same position with CanCollide = false, keep one
+        local deleteEvent = getBackpackEvent("Delete")
+        if not deleteEvent then return end
+        for key, blocks in pairs(posMap) do
+            if #blocks >= 2 then
+                -- find any with CanCollide = false (lag machine signature)
+                local hasLag = false
+                for _, b in ipairs(blocks) do
+                    if not b.CanCollide then hasLag = true break end
+                end
+                if hasLag then
+                    -- delete all but the first
+                    for i = 2, #blocks do
+                        pcall(function()
+                            deleteEvent:FireServer(blocks[i], Enum.NormalId.Top, blocks[i].Position)
+                        end)
+                        task.wait(0.05)
+                    end
+                end
+            end
+        end
+    end)
+end)
 
 -- ==================
 -- BUILD TAB
@@ -1062,27 +1539,8 @@ local function getBackpackEvent(toolName)
     return nil
 end
 
--- Friend's getInfiniteBuildArgs: finds adjacent block to build from for infinite range
+-- Infinite range: always fire directly to workspace.Terrain like the build src
 local function getInfiniteBuildArgs(targetPos)
-    local bricks = workspace:FindFirstChild("Bricks")
-    if bricks then
-        for _, p in ipairs(bricks:GetDescendants()) do
-            if p:IsA("BasePart") then
-                local diff = targetPos - p.Position
-                if math.abs(diff.Magnitude - 4) < 0.2 then
-                    local normal = Enum.NormalId.Top
-                    if     diff.X >  3 then normal = Enum.NormalId.Right
-                    elseif diff.X < -3 then normal = Enum.NormalId.Left
-                    elseif diff.Y >  3 then normal = Enum.NormalId.Top
-                    elseif diff.Y < -3 then normal = Enum.NormalId.Bottom
-                    elseif diff.Z >  3 then normal = Enum.NormalId.Back
-                    elseif diff.Z < -3 then normal = Enum.NormalId.Front
-                    end
-                    return p, normal, targetPos
-                end
-            end
-        end
-    end
     return workspace.Terrain, Enum.NormalId.Top, targetPos
 end
 
@@ -1104,14 +1562,13 @@ local function placeBlock(pos, bsize)
     repeat
         c = c + 1
         buildEvent = getBackpackEvent("Build") or buildEvent
-        -- refresh getInfiniteBuildArgs each retry in case new blocks were placed
         tBlock, tNorm, tHit = getInfiniteBuildArgs(pos)
         args = {tBlock, tNorm, tHit, bsize or "normal"}
         if buildEvent then
             pcall(function() buildEvent:FireServer(table.unpack(args)) end)
         end
-        task.wait(0.08)
-    until (built and childcube) or stopped or skipblock or c > 200
+        task.wait(0.02)
+    until (built and childcube) or stopped or skipblock or c > 50
 
     built = false
     return childcube
@@ -1393,31 +1850,6 @@ end)
 -- ==================
 -- SHARED HELPERS
 -- ==================
-local function makeBtn(parent, text, order, callback)
-    local btn = Instance.new("TextButton", parent)
-    btn.Size = UDim2.new(1, 0, 0, 30)
-    btn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-    btn.BorderSizePixel = 0
-    btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 11
-    btn.TextColor3 = Color3.fromRGB(200, 200, 200)
-    btn.Text = text
-    btn.LayoutOrder = order or 0
-    btn.ZIndex = 7
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 7)
-    local st = Instance.new("UIStroke", btn)
-    st.Color = Color3.fromRGB(45, 45, 45)
-    st.Thickness = 1
-    btn.MouseButton1Click:Connect(callback)
-    return btn
-end
-
-local function sayInChat(text)
-    pcall(function()
-        game:GetService("TextChatService").TextChannels.RBXGeneral:SendAsync(text)
-    end)
-end
-
 local function hasArkenstone()
     return player.Character and player.Character:FindFirstChild("The Arkenstone")
         or player.Backpack:FindFirstChild("The Arkenstone")
@@ -1929,6 +2361,325 @@ makeToggle(abuseTab, "Full Abuse (toggle)", 5, function(state)
     end)
 end)
 
+
+-- ==================
+-- CODES TAB
+-- ==================
+local codesTab = createTab("Codes")
+local HttpService = game:GetService("HttpService")
+
+-- Section visibility state
+local showBoombox = false
+local showGear    = false
+
+-- Saved gears list (session only)
+local savedGears = {}
+
+-- Boombox entries (default)
+local boomboxEntries = {
+    { id = "107793153086436", name = "too manny neck hurts" },
+    { id = "71105881541052",  name = "WONDER WHY THEY HATE ON ME" },
+    { id = "79636472181684",  name = "ISHOWSPEED X CENAT (patched)" },
+    { id = "121777162963537", name = "MICHAEL JACKSON" },
+    { id = "117180080592097", name = "crazy story" },
+    { id = "79408468739332",  name = "SHAWTY PIMP" },
+    { id = "87868664857813",  name = "WHOLE LOTTA SWAG" },
+    { id = "116039470543327", name = "MISERY GAY VERSION" },
+    { id = "102037782172556", name = "UHH UHH - YUKIE1" },
+    { id = "80652856472869",  name = "IKONIK OR SMTH" },
+    { id = "121605954509643", name = "TUFF SONG" },
+    { id = "138323881451411", name = "good chill song" },
+    { id = "115520764429413", name = "wemmbu song" },
+    { id = "99523952265756",  name = "i forgot" },
+}
+
+-- Helper: make a copy-row in a container
+local function makeCodeRow(parent, labelText, idText, order)
+    local row = Instance.new("Frame", parent)
+    row.Size = UDim2.new(1, 0, 0, 34)
+    row.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    row.BorderSizePixel = 0
+    row.LayoutOrder = order
+    row.ZIndex = 7
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 7)
+    local s = Instance.new("UIStroke", row)
+    s.Color = Color3.fromRGB(40, 40, 40)
+    s.Thickness = 1
+
+    local lbl = Instance.new("TextLabel", row)
+    lbl.Size = UDim2.new(1, -80, 1, 0)
+    lbl.Position = UDim2.new(0, 10, 0, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Font = Enum.Font.Gotham
+    lbl.TextSize = 10
+    lbl.TextColor3 = Color3.fromRGB(190, 190, 190)
+    lbl.Text = labelText
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.TextTruncate = Enum.TextTruncate.AtEnd
+    lbl.ZIndex = 8
+
+    local btn = Instance.new("TextButton", row)
+    btn.Size = UDim2.new(0, 60, 0, 22)
+    btn.Position = UDim2.new(1, -68, 0.5, -11)
+    btn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+    btn.BorderSizePixel = 0
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 10
+    btn.TextColor3 = Color3.fromRGB(200, 200, 200)
+    btn.Text = "Copy"
+    btn.ZIndex = 9
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    local bs = Instance.new("UIStroke", btn)
+    bs.Color = Color3.fromRGB(60, 60, 60)
+    bs.Thickness = 1
+
+    local capId = idText
+    btn.MouseButton1Click:Connect(function()
+        pcall(function()
+            local cb = setclipboard or toclipboard or (Clipboard and Clipboard.set)
+            if cb then cb(capId) end
+        end)
+        btn.Text = "Copied"
+        btn.TextColor3 = Color3.fromRGB(80, 200, 120)
+        task.delay(1.5, function()
+            btn.Text = "Copy"
+            btn.TextColor3 = Color3.fromRGB(200, 200, 200)
+        end)
+    end)
+    return row
+end
+
+-- ── BOOMBOX SECTION ─────────────────────────
+-- Toggle button
+local bbToggleBtn = Instance.new("TextButton", codesTab)
+bbToggleBtn.Size = UDim2.new(1, 0, 0, 36)
+bbToggleBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+bbToggleBtn.BorderSizePixel = 0
+bbToggleBtn.Font = Enum.Font.GothamBold
+bbToggleBtn.TextSize = 12
+bbToggleBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
+bbToggleBtn.Text = "+ Boombox Codes"
+bbToggleBtn.LayoutOrder = 1
+bbToggleBtn.ZIndex = 7
+Instance.new("UICorner", bbToggleBtn).CornerRadius = UDim.new(0, 8)
+local bbStroke = Instance.new("UIStroke", bbToggleBtn)
+bbStroke.Color = Color3.fromRGB(60, 60, 60)
+bbStroke.Thickness = 1
+
+-- Container for boombox rows
+local bbContainer = Instance.new("Frame", codesTab)
+bbContainer.Size = UDim2.new(1, 0, 0, 0)
+bbContainer.BackgroundTransparency = 1
+bbContainer.BorderSizePixel = 0
+bbContainer.LayoutOrder = 2
+bbContainer.Visible = false
+bbContainer.ClipsDescendants = true
+bbContainer.ZIndex = 7
+local bbList = Instance.new("UIListLayout", bbContainer)
+bbList.Padding = UDim.new(0, 4)
+bbList.SortOrder = Enum.SortOrder.LayoutOrder
+
+-- + add new boombox row (always first inside container)
+local bbAddRow = Instance.new("Frame", bbContainer)
+bbAddRow.Size = UDim2.new(1, 0, 0, 34)
+bbAddRow.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+bbAddRow.BorderSizePixel = 0
+bbAddRow.LayoutOrder = 0
+bbAddRow.ZIndex = 7
+Instance.new("UICorner", bbAddRow).CornerRadius = UDim.new(0, 7)
+
+local bbNameBox = Instance.new("TextBox", bbAddRow)
+bbNameBox.Size = UDim2.new(0.4, -4, 1, -8)
+bbNameBox.Position = UDim2.new(0, 4, 0, 4)
+bbNameBox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+bbNameBox.BorderSizePixel = 0
+bbNameBox.Font = Enum.Font.Gotham
+bbNameBox.TextSize = 10
+bbNameBox.TextColor3 = Color3.fromRGB(190, 190, 190)
+bbNameBox.PlaceholderText = "name"
+bbNameBox.PlaceholderColor3 = Color3.fromRGB(90, 90, 90)
+bbNameBox.Text = ""
+bbNameBox.ZIndex = 8
+Instance.new("UICorner", bbNameBox).CornerRadius = UDim.new(0, 5)
+
+local bbIdBox = Instance.new("TextBox", bbAddRow)
+bbIdBox.Size = UDim2.new(0.35, -4, 1, -8)
+bbIdBox.Position = UDim2.new(0.4, 4, 0, 4)
+bbIdBox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+bbIdBox.BorderSizePixel = 0
+bbIdBox.Font = Enum.Font.Gotham
+bbIdBox.TextSize = 10
+bbIdBox.TextColor3 = Color3.fromRGB(190, 190, 190)
+bbIdBox.PlaceholderText = "id"
+bbIdBox.PlaceholderColor3 = Color3.fromRGB(90, 90, 90)
+bbIdBox.Text = ""
+bbIdBox.ZIndex = 8
+Instance.new("UICorner", bbIdBox).CornerRadius = UDim.new(0, 5)
+
+local bbAddBtn = Instance.new("TextButton", bbAddRow)
+bbAddBtn.Size = UDim2.new(0.25, -4, 1, -8)
+bbAddBtn.Position = UDim2.new(0.75, 2, 0, 4)
+bbAddBtn.BackgroundColor3 = Color3.fromRGB(40, 120, 60)
+bbAddBtn.BorderSizePixel = 0
+bbAddBtn.Font = Enum.Font.GothamBold
+bbAddBtn.TextSize = 10
+bbAddBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
+bbAddBtn.Text = "+"
+bbAddBtn.ZIndex = 9
+Instance.new("UICorner", bbAddBtn).CornerRadius = UDim.new(0, 5)
+
+local bbEntryCount = 0
+
+local function addBoomboxRow(name, id)
+    bbEntryCount = bbEntryCount + 1
+    makeCodeRow(bbContainer, name, id, bbEntryCount + 1)
+    bbContainer.Size = UDim2.new(1, 0, 0, bbList.AbsoluteContentSize.Y + 4)
+end
+
+-- Load default songs
+for _, song in ipairs(boomboxEntries) do
+    addBoomboxRow(song.name, song.id)
+end
+
+bbAddBtn.MouseButton1Click:Connect(function()
+    local n = bbNameBox.Text:gsub("^%s*(.-)%s*$", "%1")
+    local i = bbIdBox.Text:gsub("^%s*(.-)%s*$", "%1")
+    if n ~= "" and i ~= "" then
+        addBoomboxRow(n, i)
+        bbNameBox.Text = ""
+        bbIdBox.Text = ""
+    end
+end)
+
+bbToggleBtn.MouseButton1Click:Connect(function()
+    showBoombox = not showBoombox
+    bbContainer.Visible = showBoombox
+    bbToggleBtn.Text = (showBoombox and "- Boombox Codes" or "+ Boombox Codes")
+end)
+
+makeDivider(codesTab, 3)
+
+-- ── GEAR SECTION ─────────────────────────────
+local gearToggleBtn = Instance.new("TextButton", codesTab)
+gearToggleBtn.Size = UDim2.new(1, 0, 0, 36)
+gearToggleBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+gearToggleBtn.BorderSizePixel = 0
+gearToggleBtn.Font = Enum.Font.GothamBold
+gearToggleBtn.TextSize = 12
+gearToggleBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
+gearToggleBtn.Text = "+ Gear Saver"
+gearToggleBtn.LayoutOrder = 4
+gearToggleBtn.ZIndex = 7
+Instance.new("UICorner", gearToggleBtn).CornerRadius = UDim.new(0, 8)
+local gStroke = Instance.new("UIStroke", gearToggleBtn)
+gStroke.Color = Color3.fromRGB(60, 60, 60)
+gStroke.Thickness = 1
+
+local gearContainer = Instance.new("Frame", codesTab)
+gearContainer.Size = UDim2.new(1, 0, 0, 0)
+gearContainer.BackgroundTransparency = 1
+gearContainer.BorderSizePixel = 0
+gearContainer.LayoutOrder = 5
+gearContainer.Visible = false
+gearContainer.ClipsDescendants = true
+gearContainer.ZIndex = 7
+local gList = Instance.new("UIListLayout", gearContainer)
+gList.Padding = UDim.new(0, 4)
+gList.SortOrder = Enum.SortOrder.LayoutOrder
+
+-- Add row (name + id + + button)
+local gAddRow = Instance.new("Frame", gearContainer)
+gAddRow.Size = UDim2.new(1, 0, 0, 34)
+gAddRow.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+gAddRow.BorderSizePixel = 0
+gAddRow.LayoutOrder = 0
+gAddRow.ZIndex = 7
+Instance.new("UICorner", gAddRow).CornerRadius = UDim.new(0, 7)
+
+local gNameBox = Instance.new("TextBox", gAddRow)
+gNameBox.Size = UDim2.new(0.4, -4, 1, -8)
+gNameBox.Position = UDim2.new(0, 4, 0, 4)
+gNameBox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+gNameBox.BorderSizePixel = 0
+gNameBox.Font = Enum.Font.Gotham
+gNameBox.TextSize = 10
+gNameBox.TextColor3 = Color3.fromRGB(190, 190, 190)
+gNameBox.PlaceholderText = "gear name"
+gNameBox.PlaceholderColor3 = Color3.fromRGB(90, 90, 90)
+gNameBox.Text = ""
+gNameBox.ZIndex = 8
+Instance.new("UICorner", gNameBox).CornerRadius = UDim.new(0, 5)
+
+local gIdBox = Instance.new("TextBox", gAddRow)
+gIdBox.Size = UDim2.new(0.35, -4, 1, -8)
+gIdBox.Position = UDim2.new(0.4, 4, 0, 4)
+gIdBox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+gIdBox.BorderSizePixel = 0
+gIdBox.Font = Enum.Font.Gotham
+gIdBox.TextSize = 10
+gIdBox.TextColor3 = Color3.fromRGB(190, 190, 190)
+gIdBox.PlaceholderText = "gear id"
+gIdBox.PlaceholderColor3 = Color3.fromRGB(90, 90, 90)
+gIdBox.Text = ""
+gIdBox.ZIndex = 8
+Instance.new("UICorner", gIdBox).CornerRadius = UDim.new(0, 5)
+
+local gAddBtn = Instance.new("TextButton", gAddRow)
+gAddBtn.Size = UDim2.new(0.25, -4, 1, -8)
+gAddBtn.Position = UDim2.new(0.75, 2, 0, 4)
+gAddBtn.BackgroundColor3 = Color3.fromRGB(40, 120, 60)
+gAddBtn.BorderSizePixel = 0
+gAddBtn.Font = Enum.Font.GothamBold
+gAddBtn.TextSize = 10
+gAddBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
+gAddBtn.Text = "+"
+gAddBtn.ZIndex = 9
+Instance.new("UICorner", gAddBtn).CornerRadius = UDim.new(0, 5)
+
+local gearEntryCount = 0
+
+local function addGearRow(name, id)
+    gearEntryCount = gearEntryCount + 1
+    local row = makeCodeRow(gearContainer, name, id, gearEntryCount + 1)
+    -- gear me button on each row
+    local gBtn = Instance.new("TextButton", row)
+    gBtn.Size = UDim2.new(0, 55, 0, 22)
+    gBtn.Position = UDim2.new(1, -128, 0.5, -11)
+    gBtn.BackgroundColor3 = Color3.fromRGB(35, 80, 35)
+    gBtn.BorderSizePixel = 0
+    gBtn.Font = Enum.Font.GothamBold
+    gBtn.TextSize = 9
+    gBtn.TextColor3 = Color3.fromRGB(200, 220, 200)
+    gBtn.Text = "Gear me"
+    gBtn.ZIndex = 10
+    Instance.new("UICorner", gBtn).CornerRadius = UDim.new(0, 6)
+    local capId = id
+    gBtn.MouseButton1Click:Connect(function()
+        sayInChat(";gear me " .. capId)
+    end)
+    gearContainer.Size = UDim2.new(1, 0, 0, gList.AbsoluteContentSize.Y + 4)
+end
+
+gAddBtn.MouseButton1Click:Connect(function()
+    local n = gNameBox.Text:gsub("^%s*(.-)%s*$", "%1")
+    local i = gIdBox.Text:gsub("^%s*(.-)%s*$", "%1")
+    if n ~= "" and i ~= "" then
+        addGearRow(n, i)
+        gNameBox.Text = ""
+        gIdBox.Text = ""
+    end
+end)
+
+gearToggleBtn.MouseButton1Click:Connect(function()
+    showGear = not showGear
+    gearContainer.Visible = showGear
+    gearToggleBtn.Text = (showGear and "- Gear Saver" or "+ Gear Saver")
+    if showGear then
+        task.wait()
+        gearContainer.Size = UDim2.new(1, 0, 0, gList.AbsoluteContentSize.Y + 4)
+    end
+end)
+
 -- ==================
 -- MIC TAB
 -- ==================
@@ -2165,4 +2916,247 @@ openBtn.MouseButton1Click:Connect(function()
     openUI()
 end)
 
-print("ManesHub loaded. Tap M or press RightShift to open.")
+-- ==================
+-- ANTIS TAB
+-- ==================
+local antisTab = createTab("Antis")
+
+makeLabel(antisTab, "anti features", 1)
+makeDivider(antisTab, 2)
+
+local antiConns = {}
+local originalFallenHeight = workspace.FallenPartsDestroyHeight
+
+local function clearAntiConn(name)
+    if antiConns[name] then
+        pcall(function() antiConns[name]:Disconnect() end)
+        antiConns[name] = nil
+    end
+end
+
+local function getChar2() return player.Character end
+local function getHum2() local c = getChar2() return c and c:FindFirstChildOfClass("Humanoid") end
+local function getRoot2() local c = getChar2() return c and c:FindFirstChild("HumanoidRootPart") end
+
+local function breakVel2()
+    local zero = Vector3.zero
+    local endTime = tick() + 0.8
+    while tick() < endTime do
+        local char = getChar2()
+        if char then
+            for _, part in ipairs(char:GetChildren()) do
+                if part:IsA("BasePart") then
+                    part.AssemblyLinearVelocity = zero
+                    part.AssemblyAngularVelocity = zero
+                end
+            end
+        end
+        task.wait()
+    end
+end
+
+local function askUnstun2()
+    local hum = getHum2()
+    if hum then
+        hum.PlatformStand = false
+        hum.Sit = false
+        hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+    end
+end
+
+-- Anti Drag
+makeToggle(antisTab, "Anti Drag", 3, function(state)
+    clearAntiConn("AntiDrag")
+    if state then
+        antiConns.AntiDrag = game:GetService("RunService").Heartbeat:Connect(function()
+            local char = getChar2()
+            if not char then return end
+            local Dragger = char:FindFirstChild("Dragger")
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if Dragger and hum then
+                pcall(function() Dragger.ResponseStyle = Enum.DragDetectorResponseStyle.Custom end)
+                if hum.PlatformStand then
+                    hum.PlatformStand = false
+                    hum.Sit = false
+                    hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+                end
+            end
+        end)
+    end
+end)
+
+-- Anti Stun
+makeToggle(antisTab, "Anti Stun", 4, function(state)
+    clearAntiConn("AntiStun")
+    if state then
+        antiConns.AntiStun = game:GetService("RunService").Heartbeat:Connect(function()
+            local hum = getHum2()
+            if hum and hum.PlatformStand then askUnstun2() end
+        end)
+    end
+end)
+
+-- Anti Void
+makeToggle(antisTab, "Anti Void", 5, function(state)
+    clearAntiConn("AntiVoid")
+    if state then
+        workspace.FallenPartsDestroyHeight = -50000
+        antiConns.AntiVoid = game:GetService("RunService").Stepped:Connect(function()
+            local root = getRoot2()
+            if root and root.Position.Y < -100 then
+                root.CFrame = CFrame.new(0, 100, 0)
+                root.AssemblyLinearVelocity = Vector3.zero
+            end
+        end)
+    else
+        workspace.FallenPartsDestroyHeight = originalFallenHeight
+    end
+end)
+
+-- Anti Fling
+makeToggle(antisTab, "Anti Fling", 6, function(state)
+    clearAntiConn("AntiFling")
+    if state then
+        antiConns.AntiFling = game:GetService("RunService").Heartbeat:Connect(function()
+            local root = getRoot2()
+            if not root then return end
+            if root.AssemblyLinearVelocity.Magnitude > 200 then
+                root.AssemblyLinearVelocity = Vector3.zero
+                root.AssemblyAngularVelocity = Vector3.zero
+            end
+            local pos = root.Position
+            if math.abs(pos.X) > 10000 or math.abs(pos.Y) > 10000 or math.abs(pos.Z) > 10000 then
+                root.AssemblyLinearVelocity = Vector3.zero
+                player.Character:PivotTo(CFrame.new(0, 200, 0))
+                task.spawn(breakVel2)
+            end
+        end)
+    end
+end)
+
+-- Anti Freeze
+makeToggle(antisTab, "Anti Freeze", 7, function(state)
+    clearAntiConn("AntiFreeze")
+    if state then
+        local lastGoodCF = nil
+        antiConns.AntiFreeze = game:GetService("RunService").Heartbeat:Connect(function()
+            local char = getChar2()
+            local root = getRoot2()
+            local hum = getHum2()
+            if not char or not root or not hum or hum.Health <= 0 then return end
+            if not root.Anchored then lastGoodCF = root.CFrame end
+            local frozen = root.Anchored or (char:FindFirstChild("Torso") and char.Torso.Transparency == 1)
+            if workspace:FindFirstChild(player.Name) and workspace[player.Name]:FindFirstChild("Hielo") then frozen = true end
+            if frozen then
+                hum.Health = 0
+                if lastGoodCF then
+                    player.CharacterAdded:Once(function(newChar)
+                        task.wait(0.4)
+                        local newRoot = newChar:WaitForChild("HumanoidRootPart", 5)
+                        if newRoot then newRoot.CFrame = lastGoodCF end
+                    end)
+                end
+            end
+        end)
+    end
+end)
+
+-- Anti Jail
+makeToggle(antisTab, "Anti Jail", 8, function(state)
+    clearAntiConn("AntiJail")
+    if state then
+        antiConns.AntiJail = game:GetService("RunService").Heartbeat:Connect(function()
+            local char = getChar2()
+            if not char then return end
+            local jail = char:FindFirstChild("Jail")
+            if jail then
+                for _, part in ipairs(jail:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.CanCollide = false
+                        part.CanTouch = false
+                        part.CanQuery = false
+                        part.LocalTransparencyModifier = 1
+                    end
+                end
+            end
+            for _, obj in ipairs(workspace:GetDescendants()) do
+                local name = string.lower(obj.Name)
+                if name:find("jail") or name:find("cage") or name:find("prison") or name:find("cell") then
+                    if obj:IsA("BasePart") then
+                        obj.LocalTransparencyModifier = 1
+                        obj.CanCollide = false
+                    end
+                end
+            end
+        end)
+    end
+end)
+
+-- Anti Visual
+makeToggle(antisTab, "Anti Visual", 9, function(state)
+    clearAntiConn("AntiVisual")
+    if state then
+        local Lighting = game:GetService("Lighting")
+        local StarterGui = game:GetService("StarterGui")
+        antiConns.AntiVisual = game:GetService("RunService").Heartbeat:Connect(function()
+            local pg = player:WaitForChild("PlayerGui")
+            local blind = pg:FindFirstChild("Blind") or pg:FindFirstChild("BlindGUI")
+            if blind then blind.Enabled = false end
+            local ob = pg:FindFirstChild("OwnerBlinder")
+            if ob then ob:Destroy() end
+            for _, e in ipairs(Lighting:GetChildren()) do
+                if e:IsA("BlurEffect") or e:IsA("DepthOfFieldEffect") or e:IsA("ColorCorrectionEffect") or e:IsA("BloomEffect") or e:IsA("SunRaysEffect") then
+                    e.Enabled = false
+                end
+            end
+            if Lighting:FindFirstChild("Fog") then Lighting.Fog.Density = 0 end
+            local cam = workspace.CurrentCamera
+            local hum = getHum2()
+            if cam and hum then
+                cam.CameraType = Enum.CameraType.Custom
+                cam.CameraSubject = hum
+                if cam.FieldOfView ~= 70 then cam.FieldOfView = 70 end
+            end
+            pcall(function() StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, true) end)
+        end)
+    end
+end)
+
+-- Anti Gravity
+makeToggle(antisTab, "Anti Gravity", 10, function(state)
+    clearAntiConn("AntiGravity")
+    if state then
+        antiConns.AntiGravity = game:GetService("RunService").Heartbeat:Connect(function()
+            if player:GetAttribute("Flying") == true then return end
+            if workspace.Gravity ~= 196.2 then workspace.Gravity = 196.2 end
+        end)
+    end
+end)
+
+-- Anti Move / Force
+makeToggle(antisTab, "Anti Move / Force", 11, function(state)
+    clearAntiConn("AntiMove")
+    if state then
+        antiConns.AntiMove = game:GetService("RunService").Heartbeat:Connect(function()
+            local char = getChar2()
+            if not char then return end
+            for _, mover in ipairs(char:GetDescendants()) do
+                if not mover:FindFirstAncestorOfClass("Tool") and (
+                    mover:IsA("BodyVelocity") or mover:IsA("BodyAngularVelocity") or
+                    mover:IsA("BodyPosition") or mover:IsA("BodyGyro") or
+                    mover:IsA("LinearVelocity") or mover:IsA("AngularVelocity") or
+                    mover:IsA("VectorForce") or mover:IsA("AlignPosition") or
+                    mover:IsA("AlignOrientation")
+                ) then
+                    pcall(function() mover:Destroy() end)
+                end
+            end
+            local hum = getHum2()
+            if hum then
+                hum.PlatformStand = false
+                hum.Sit = false
+                hum.AutoRotate = true
+            end
+        end)
+    end
+end)
