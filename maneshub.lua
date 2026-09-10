@@ -1016,24 +1016,76 @@ end)
 makeDivider(deadlyTab, 10)
 makeLabel(deadlyTab, "lag machine", 11)
 
--- Lag Machine
+-- block counter label
+local lagCountLbl = makeLabel(deadlyTab, "blocks placed: 0", 12)
+lagCountLbl.TextColor3 = Color3.fromRGB(120, 200, 120)
+
 local lagRunning = false
-makeToggle(deadlyTab, "Lag Machine", 12, function(state)
-    lagRunning = state
+local antiLagOn = false
+local lagBlockCount = 0
+
+-- Anti Lag Machine toggle (defined before lag machine so it can be read)
+makeToggle(deadlyTab, "Anti Lag Machine", 13, function(state)
+    antiLagOn = state
     if not state then return end
+    -- scan on heartbeat for CanCollide=false duplicate blocks and delete them
+    local deleteEvent = player.Backpack:FindFirstChild("Delete")
+        and player.Backpack.Delete:FindFirstChild("Script")
+        and player.Backpack.Delete.Script:FindFirstChild("Event")
+    if not deleteEvent then return end
+    local antiConn
+    antiConn = game:GetService("RunService").Heartbeat:Connect(function()
+        if not antiLagOn then antiConn:Disconnect() return end
+        local bricks = workspace:FindFirstChild("Bricks")
+        if not bricks then return end
+        local posMap = {}
+        for _, folder in ipairs(bricks:GetChildren()) do
+            for _, block in ipairs(folder:GetChildren()) do
+                if block:IsA("BasePart") and not block.CanCollide then
+                    local p = block.Position
+                    local key = math.round(p.X).."_"..math.round(p.Y).."_"..math.round(p.Z)
+                    if not posMap[key] then posMap[key] = {} end
+                    table.insert(posMap[key], block)
+                end
+            end
+        end
+        for _, blocks in pairs(posMap) do
+            if #blocks >= 2 then
+                for i = 2, #blocks do
+                    local b = blocks[i]
+                    if b and b.Parent then
+                        pcall(function()
+                            deleteEvent:FireServer(b, Enum.NormalId.Top, b.Position)
+                        end)
+                    end
+                end
+            end
+        end
+    end)
+end)
+
+makeToggle(deadlyTab, "Lag Machine", 14, function(state)
+    lagRunning = state
+    if not state then
+        lagBlockCount = 0
+        lagCountLbl.Text = "blocks placed: 0"
+        return
+    end
     task.spawn(function()
         local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
         if not hrp then return end
 
-        local basePos = hrp.Position + Vector3.new(0, 4, 0)
-
-        -- get build event exactly like the src
         local buildEvent = player.Backpack:FindFirstChild("Build")
             and player.Backpack.Build:FindFirstChild("Script")
             and player.Backpack.Build.Script:FindFirstChild("Event")
-        if not buildEvent then return end
+        local paintEvent = player.Backpack:FindFirstChild("Paint")
+            and player.Backpack.Paint:FindFirstChild("Script")
+            and player.Backpack.Paint.Script:FindFirstChild("Event")
+        local deleteEvent = player.Backpack:FindFirstChild("Delete")
+            and player.Backpack.Delete:FindFirstChild("Script")
+            and player.Backpack.Delete.Script:FindFirstChild("Event")
+        if not buildEvent or not paintEvent then return end
 
-        -- wait for Bricks folder
         local myFolder = nil
         for i = 1, 20 do
             local b = workspace:FindFirstChild("Bricks")
@@ -1043,106 +1095,108 @@ makeToggle(deadlyTab, "Lag Machine", 12, function(state)
         end
         if not myFolder then return end
 
-        -- listen for new block
-        local block = nil
-        local conn = myFolder.ChildAdded:Connect(function(c) if not block then block = c end end)
-
-        -- fire exactly like the src
-        for i = 1, 20 do
-            pcall(function()
-                buildEvent:FireServer(workspace.Terrain, Enum.NormalId.Top, basePos, "detailed")
-            end)
-            task.wait(0.15)
-            if block then break end
+        -- helper: build and wait for block to appear
+        local function buildBlock(pos, size)
+            local block = nil
+            local conn = myFolder.ChildAdded:Connect(function(c) if not block then block = c end end)
+            for i = 1, 20 do
+                pcall(function() buildEvent:FireServer(workspace.Terrain, Enum.NormalId.Top, pos, size or "detailed") end)
+                task.wait(0.15)
+                if block then break end
+            end
+            conn:Disconnect()
+            if block then
+                lagBlockCount = lagBlockCount + 1
+                lagCountLbl.Text = "blocks placed: " .. lagBlockCount
+            end
+            return block
         end
-        conn:Disconnect()
-        if not block then return end
 
-        -- 2. paint all 6 sides with random spray text
-        local paintEvent = player.Backpack:FindFirstChild("Paint")
-            and player.Backpack.Paint:FindFirstChild("Script")
-            and player.Backpack.Paint.Script:FindFirstChild("Event")
-        local sides = {
-            Enum.NormalId.Top, Enum.NormalId.Bottom,
-            Enum.NormalId.Front, Enum.NormalId.Back,
-            Enum.NormalId.Left, Enum.NormalId.Right,
-        }
-        if paintEvent then
+        local function paintBlackNeon(block)
+            if not block or not block.Parent then return end
+            local sides = {
+                Enum.NormalId.Top, Enum.NormalId.Bottom,
+                Enum.NormalId.Front, Enum.NormalId.Back,
+                Enum.NormalId.Left, Enum.NormalId.Right,
+            }
             for _, side in ipairs(sides) do
-                local randTxt = tostring(math.random(10000000, 99999999))
                 pcall(function()
                     paintEvent:FireServer(
                         block, side,
                         block.Position + block.Size / 2,
                         "both \xF0\x9F\xA4\x9D",
-                        Color3.new(0.251, 0.251, 0.251),
-                        "spray",
-                        randTxt
+                        Color3.new(0.00999, 0.00999, 0.00999),
+                        "neon", ""
                     )
                 end)
-                task.wait(0.05)
+                task.wait(0.02)
             end
+            -- set CanCollide false
+            pcall(function() block.CanCollide = false end)
         end
-        task.wait(0.1)
 
-        -- 3. clone then delete loop
-        local deleteEvent = player.Backpack:FindFirstChild("Delete")
-            and player.Backpack.Delete:FindFirstChild("Script")
-            and player.Backpack.Delete.Script:FindFirstChild("Event")
-        while lagRunning and block and block.Parent do
-            local clone = block:Clone()
-            clone.Parent = myFolder
-            task.wait(0.1)
-            if deleteEvent then
+        local sprayList = {"\xF0\x9F\x94\xA5","\xF0\x9F\x92\x80","\xE2\xAD\x90","\xF0\x9F\x91\xBD","\xF0\x9F\x8C\x80","\xF0\x9F\x98\xB1"}
+        local function sprayAllSides(block)
+            if not block or not block.Parent then return end
+            local sides = {
+                Enum.NormalId.Top, Enum.NormalId.Bottom,
+                Enum.NormalId.Front, Enum.NormalId.Back,
+                Enum.NormalId.Left, Enum.NormalId.Right,
+            }
+            for _, side in ipairs(sides) do
+                local txt = sprayList[math.random(1,#sprayList)] .. tostring(math.random(1000,9999))
                 pcall(function()
-                    deleteEvent:FireServer(clone, Enum.NormalId.Top, clone.Position)
+                    paintEvent:FireServer(
+                        block, side,
+                        block.Position + block.Size / 2,
+                        "both \xF0\x9F\xA4\x9D",
+                        Color3.new(0.00999, 0.00999, 0.00999),
+                        "spray", txt
+                    )
                 end)
+                task.wait(0.02)
+            end
+        end
+
+        -- STEP 1: build on body
+        local pos1 = hrp.Position + Vector3.new(0, 4, 0)
+        local block1 = buildBlock(pos1)
+        if not block1 then return end
+
+        -- STEP 2: paint black neon
+        paintBlackNeon(block1)
+
+        -- STEP 3: build another block on top
+        local pos2 = block1.Position + Vector3.new(0, 4, 0)
+        local block2 = buildBlock(pos2)
+        if not block2 then return end
+
+        -- STEP 4: spray all 6 sides with random emoji + number
+        sprayAllSides(block2)
+        pcall(function() block2.CanCollide = false end)
+
+        -- STEP 5: spam build (and delete if anti lag on) till toggled off
+        local spamPos = block2.Position + Vector3.new(0, 0, 0)
+        while lagRunning do
+            local spamBlock = nil
+            local conn2 = myFolder.ChildAdded:Connect(function(c) if not spamBlock then spamBlock = c end end)
+            pcall(function() buildEvent:FireServer(workspace.Terrain, Enum.NormalId.Top, spamPos, "detailed") end)
+            task.wait(0.1)
+            conn2:Disconnect()
+
+            if spamBlock then
+                lagBlockCount = lagBlockCount + 1
+                lagCountLbl.Text = "blocks placed: " .. lagBlockCount
+                pcall(function() spamBlock.CanCollide = false end)
+
+                if antiLagOn and deleteEvent then
+                    -- anti lag on: delete right after placing
+                    pcall(function()
+                        deleteEvent:FireServer(spamBlock, Enum.NormalId.Top, spamBlock.Position)
+                    end)
+                end
             end
             task.wait(0.1)
-        end
-    end)
-end)
-
-makeDivider(deadlyTab, 13)
-makeLabel(deadlyTab, "anti lag machine", 14)
-
--- Anti Lag Machine
-makeBtn(deadlyTab, "Clean Lag Machine Blocks", 15, function()
-    task.spawn(function()
-        local bricks = workspace:FindFirstChild("Bricks")
-        if not bricks then return end
-        -- group all blocks by rounded position
-        local posMap = {}
-        for _, folder in ipairs(bricks:GetChildren()) do
-            for _, block in ipairs(folder:GetChildren()) do
-                if block:IsA("BasePart") then
-                    local p = block.Position
-                    local key = math.round(p.X) .. "_" .. math.round(p.Y) .. "_" .. math.round(p.Z)
-                    if not posMap[key] then posMap[key] = {} end
-                    table.insert(posMap[key], block)
-                end
-            end
-        end
-        -- delete duplicates at same position with CanCollide = false, keep one
-        local deleteEvent = getBackpackEvent("Delete")
-        if not deleteEvent then return end
-        for key, blocks in pairs(posMap) do
-            if #blocks >= 2 then
-                -- find any with CanCollide = false (lag machine signature)
-                local hasLag = false
-                for _, b in ipairs(blocks) do
-                    if not b.CanCollide then hasLag = true break end
-                end
-                if hasLag then
-                    -- delete all but the first
-                    for i = 2, #blocks do
-                        pcall(function()
-                            deleteEvent:FireServer(blocks[i], Enum.NormalId.Top, blocks[i].Position)
-                        end)
-                        task.wait(0.05)
-                    end
-                end
-            end
         end
     end)
 end)
