@@ -1025,23 +1025,11 @@ makeToggle(deadlyTab, "Lag Machine", 12, function(state)
         local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
         if not hrp then return end
 
-        -- 1. build the detailed block at player position
-        local buildEvent = getBackpackEvent("Build")
-        if not buildEvent then return end
+        -- 1. build the detailed block at player position using placeBlock
         local basePos = hrp.Position + Vector3.new(0, 4, 0)
-        pcall(function() buildEvent:FireServer(workspace.Terrain, Enum.NormalId.Top, basePos, "detailed") end)
-        task.wait(0.3)
-
-        -- find the block we just placed
-        local myFolder = workspace:FindFirstChild("Bricks") and workspace.Bricks:FindFirstChild(player.Name)
-        if not myFolder then return end
-        local block = nil
-        for _, v in ipairs(myFolder:GetChildren()) do
-            if v:IsA("BasePart") and (v.Position - basePos).Magnitude < 6 then
-                block = v break
-            end
-        end
+        local block = placeBlock(basePos, "detailed")
         if not block then return end
+        task.wait(0.2)
 
         -- 2. paint all 6 sides with random spray text
         local paintEvent = getBackpackEvent("Paint")
@@ -1055,8 +1043,7 @@ makeToggle(deadlyTab, "Lag Machine", 12, function(state)
                 local randTxt = tostring(math.random(10000000, 99999999))
                 pcall(function()
                     paintEvent:FireServer(
-                        block,
-                        side,
+                        block, side,
                         block.Position + block.Size / 2,
                         "both \xF0\x9F\xA4\x9D",
                         Color3.new(0.251, 0.251, 0.251),
@@ -1069,22 +1056,18 @@ makeToggle(deadlyTab, "Lag Machine", 12, function(state)
         end
         task.wait(0.1)
 
-        -- 3. repeatedly clone block then delete clone on same block
+        -- 3. clone then delete on loop
+        local myFolder = workspace:FindFirstChild("Bricks") and workspace.Bricks:FindFirstChild(player.Name)
+        if not myFolder then return end
+        local deleteEvent = getBackpackEvent("Delete")
         while lagRunning and block and block.Parent do
-            -- clone
-            pcall(function() block:Clone().Parent = myFolder end)
+            local clone = block:Clone()
+            clone.Parent = myFolder
             task.wait(0.1)
-            -- delete the newest duplicate (not our original)
-            for _, v in ipairs(myFolder:GetChildren()) do
-                if v ~= block and v:IsA("BasePart") and (v.Position - block.Position).Magnitude < 2 then
-                    local deleteEvent = getBackpackEvent("Delete")
-                    if deleteEvent then
-                        pcall(function()
-                            deleteEvent:FireServer(v, Enum.NormalId.Top, v.Position)
-                        end)
-                    end
-                    break
-                end
+            if deleteEvent then
+                pcall(function()
+                    deleteEvent:FireServer(clone, Enum.NormalId.Top, clone.Position)
+                end)
             end
             task.wait(0.1)
         end
