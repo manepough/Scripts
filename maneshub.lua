@@ -1026,18 +1026,32 @@ makeToggle(deadlyTab, "Lag Machine", 12, function(state)
         if not hrp then return end
 
         local basePos = hrp.Position + Vector3.new(0, 4, 0)
-        local myFolder = workspace:FindFirstChild("Bricks") and workspace.Bricks:FindFirstChild(player.Name)
-        if not myFolder then return end
 
-        -- 1. build detailed block directly like the src
-        local buildEvent = getBackpackEvent("Build")
+        -- get build event exactly like the src
+        local buildEvent = player.Backpack:FindFirstChild("Build")
+            and player.Backpack.Build:FindFirstChild("Script")
+            and player.Backpack.Build.Script:FindFirstChild("Event")
         if not buildEvent then return end
 
-        -- wait for block to appear
+        -- wait for Bricks folder
+        local myFolder = nil
+        for i = 1, 20 do
+            local b = workspace:FindFirstChild("Bricks")
+            if b then myFolder = b:FindFirstChild(player.Name) end
+            if myFolder then break end
+            task.wait(0.2)
+        end
+        if not myFolder then return end
+
+        -- listen for new block
         local block = nil
         local conn = myFolder.ChildAdded:Connect(function(c) if not block then block = c end end)
+
+        -- fire exactly like the src
         for i = 1, 20 do
-            pcall(function() buildEvent:FireServer(workspace.Terrain, Enum.NormalId.Top, basePos, "detailed") end)
+            pcall(function()
+                buildEvent:FireServer(workspace.Terrain, Enum.NormalId.Top, basePos, "detailed")
+            end)
             task.wait(0.15)
             if block then break end
         end
@@ -1045,7 +1059,9 @@ makeToggle(deadlyTab, "Lag Machine", 12, function(state)
         if not block then return end
 
         -- 2. paint all 6 sides with random spray text
-        local paintEvent = getBackpackEvent("Paint")
+        local paintEvent = player.Backpack:FindFirstChild("Paint")
+            and player.Backpack.Paint:FindFirstChild("Script")
+            and player.Backpack.Paint.Script:FindFirstChild("Event")
         local sides = {
             Enum.NormalId.Top, Enum.NormalId.Bottom,
             Enum.NormalId.Front, Enum.NormalId.Back,
@@ -1070,7 +1086,9 @@ makeToggle(deadlyTab, "Lag Machine", 12, function(state)
         task.wait(0.1)
 
         -- 3. clone then delete loop
-        local deleteEvent = getBackpackEvent("Delete")
+        local deleteEvent = player.Backpack:FindFirstChild("Delete")
+            and player.Backpack.Delete:FindFirstChild("Script")
+            and player.Backpack.Delete.Script:FindFirstChild("Event")
         while lagRunning and block and block.Parent do
             local clone = block:Clone()
             clone.Parent = myFolder
