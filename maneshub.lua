@@ -1025,11 +1025,24 @@ makeToggle(deadlyTab, "Lag Machine", 12, function(state)
         local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
         if not hrp then return end
 
-        -- 1. build the detailed block at player position using placeBlock
         local basePos = hrp.Position + Vector3.new(0, 4, 0)
-        local block = placeBlock(basePos, "detailed")
+        local myFolder = workspace:FindFirstChild("Bricks") and workspace.Bricks:FindFirstChild(player.Name)
+        if not myFolder then return end
+
+        -- 1. build detailed block directly like the src
+        local buildEvent = getBackpackEvent("Build")
+        if not buildEvent then return end
+
+        -- wait for block to appear
+        local block = nil
+        local conn = myFolder.ChildAdded:Connect(function(c) if not block then block = c end end)
+        for i = 1, 20 do
+            pcall(function() buildEvent:FireServer(workspace.Terrain, Enum.NormalId.Top, basePos, "detailed") end)
+            task.wait(0.15)
+            if block then break end
+        end
+        conn:Disconnect()
         if not block then return end
-        task.wait(0.2)
 
         -- 2. paint all 6 sides with random spray text
         local paintEvent = getBackpackEvent("Paint")
@@ -1056,9 +1069,7 @@ makeToggle(deadlyTab, "Lag Machine", 12, function(state)
         end
         task.wait(0.1)
 
-        -- 3. clone then delete on loop
-        local myFolder = workspace:FindFirstChild("Bricks") and workspace.Bricks:FindFirstChild(player.Name)
-        if not myFolder then return end
+        -- 3. clone then delete loop
         local deleteEvent = getBackpackEvent("Delete")
         while lagRunning and block and block.Parent do
             local clone = block:Clone()
