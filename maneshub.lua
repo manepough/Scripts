@@ -38,6 +38,18 @@ local function sayInChat(text)
     end)()
 end
 
+local function getBackpackEvent(toolName)
+    local bp = player.Backpack:FindFirstChild(toolName)
+    if bp and bp:FindFirstChild("Script") and bp.Script:FindFirstChild("Event") then
+        return bp.Script.Event
+    end
+    local ct = player.Character and player.Character:FindFirstChild(toolName)
+    if ct and ct:FindFirstChild("Script") and ct.Script:FindFirstChild("Event") then
+        return ct.Script.Event
+    end
+    return nil
+end
+
 local function makeBtn(parent, text, order, callback)
     local btn = Instance.new("TextButton", parent)
     btn.Size = UDim2.new(1, 0, 0, 30)
@@ -1012,11 +1024,11 @@ makeToggle(deadlyTab, "Lag Machine", 12, function(state)
     task.spawn(function()
         local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
         if not hrp then return end
-        local basePos = hrp.Position + Vector3.new(0, 4, 0)
 
-        -- 1. build the detailed block once
+        -- 1. build the detailed block at player position
         local buildEvent = getBackpackEvent("Build")
         if not buildEvent then return end
+        local basePos = hrp.Position + Vector3.new(0, 4, 0)
         pcall(function() buildEvent:FireServer(workspace.Terrain, Enum.NormalId.Top, basePos, "detailed") end)
         task.wait(0.3)
 
@@ -1527,18 +1539,6 @@ end)
 -- Falls back to Character only if the tool genuinely isn't in Backpack (e.g. it's
 -- already equipped from a prior session), so this still works either way without
 -- ever moving anything itself.
-local function getBackpackEvent(toolName)
-    local bp = player.Backpack:FindFirstChild(toolName)
-    if bp and bp:FindFirstChild("Script") and bp.Script:FindFirstChild("Event") then
-        return bp.Script.Event
-    end
-    local ct = player.Character and player.Character:FindFirstChild(toolName)
-    if ct and ct:FindFirstChild("Script") and ct.Script:FindFirstChild("Event") then
-        return ct.Script.Event
-    end
-    return nil
-end
-
 -- Infinite range: always fire directly to workspace.Terrain like the build src
 local function getInfiniteBuildArgs(targetPos)
     return workspace.Terrain, Enum.NormalId.Top, targetPos
