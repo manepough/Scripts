@@ -34,7 +34,12 @@ local mouse = player:GetMouse()
 
 local function sayInChat(text)
     coroutine.wrap(function()
-        game:GetService("TextChatService").TextChannels.RBXGeneral:SendAsync(text)
+        local tcs = game:GetService("TextChatService")
+        local channel = tcs.TextChannels:FindFirstChild("RBXGeneral")
+            or tcs.TextChannels:WaitForChild("RBXGeneral", 5)
+        if channel then
+            pcall(function() channel:SendAsync(text) end)
+        end
     end)()
 end
 
