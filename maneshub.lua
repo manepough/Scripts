@@ -26,7 +26,18 @@ local function isWhitelisted()
 end
 
 if not isWhitelisted() then
-    player:Kick("ur not whitelisted ik Sebastian gave u this broo")
+    -- Kick not available in exploit context, show notice and stop
+    local sg = Instance.new("ScreenGui", player.PlayerGui)
+    sg.Name = "NotWhitelisted"
+    sg.ResetOnSpawn = false
+    local lbl = Instance.new("TextLabel", sg)
+    lbl.Size = UDim2.new(1, 0, 1, 0)
+    lbl.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextSize = 20
+    lbl.TextColor3 = Color3.fromRGB(255, 80, 80)
+    lbl.Text = "ur not whitelisted ik Sebastian gave u this broo"
+    task.delay(3, function() sg:Destroy() end)
     return
 end
 
