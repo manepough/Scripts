@@ -41,7 +41,9 @@ if not isWhitelisted() then
     return
 end
 
-local mouse = player:GetMouse()
+local mouse = nil
+pcall(function() mouse = player:GetMouse() end)
+if not mouse then mouse = {X=0, Y=0, Button1Down = Instance.new("BindableEvent").Event} end
 
 local function sayInChat(text)
     coroutine.wrap(function()
@@ -909,7 +911,7 @@ makeToggle(deadlyTab, "Glitch blocks", 6, function(state)
                             v,
                             Enum.NormalId.Top,
                             v.Position,
-                            "both \xF0\x9F\xA4\x9D",
+                            "both 🤝",
                             col,
                             "neon",
                             ""
@@ -1140,7 +1142,7 @@ makeToggle(deadlyTab, "Lag Machine", 14, function(state)
                     paintEvent:FireServer(
                         block, side,
                         block.Position + block.Size / 2,
-                        "both \xF0\x9F\xA4\x9D",
+                        "both 🤝",
                         Color3.new(0.00999, 0.00999, 0.00999),
                         "neon", ""
                     )
@@ -1165,7 +1167,7 @@ makeToggle(deadlyTab, "Lag Machine", 14, function(state)
                     paintEvent:FireServer(
                         block, side,
                         block.Position + block.Size / 2,
-                        "both \xF0\x9F\xA4\x9D",
+                        "both 🤝",
                         Color3.new(0.00999, 0.00999, 0.00999),
                         "spray", txt
                     )
@@ -1668,7 +1670,7 @@ local function paintBlock(block, color, matStr, origmat)
 
     if color then
         -- use "both 🤝" to set color AND material in one call (friend's method)
-        local args = {block, Enum.NormalId.Top, pos, "both \xF0\x9F\xA4\x9D", color, mat, ""}
+        local args = {block, Enum.NormalId.Top, pos, "both 🤝", color, mat, ""}
         c = 0
         repeat
             c = c + 1
