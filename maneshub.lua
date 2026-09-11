@@ -15,6 +15,7 @@ local whitelist = {
     8891263921,
     3106404044,
     1968988470,
+    10267385735,
 }
 
 local function isWhitelisted()
@@ -43,15 +44,28 @@ end
 
 local mouse = nil
 pcall(function() mouse = player:GetMouse() end)
-if not mouse then mouse = {X=0, Y=0, Button1Down = Instance.new("BindableEvent").Event} end
+if not mouse then pcall(function() mouse = getmouse() end) end
+if not mouse then
+    mouse = {X = 0, Y = 0}
+    mouse.Button1Down = {Connect = function() return {Disconnect = function() end} end}
+end
 
 local function sayInChat(text)
     coroutine.wrap(function()
-        local tcs = game:GetService("TextChatService")
-        local channel = tcs.TextChannels:FindFirstChild("RBXGeneral")
-            or tcs.TextChannels:WaitForChild("RBXGeneral", 5)
-        if channel then
-            pcall(function() channel:SendAsync(text) end)
+        -- try TextChatService first
+        local ok = pcall(function()
+            local tcs = game:GetService("TextChatService")
+            local channel = tcs.TextChannels:FindFirstChild("RBXGeneral")
+                or tcs.TextChannels:WaitForChild("RBXGeneral", 3)
+            if channel then channel:SendAsync(text) end
+        end)
+        -- fallback: legacy chat (Arceus X Neo compatible)
+        if not ok then
+            pcall(function()
+                game:GetService("ReplicatedStorage")
+                    .DefaultChatSystemChatEvents
+                    .SayMessageRequest:FireServer(text, "All")
+            end)
         end
     end)()
 end
@@ -92,12 +106,15 @@ local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "ManesHub"
 screenGui.ResetOnSpawn = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-screenGui.Parent = player.PlayerGui
+pcall(function() screenGui.Parent = player.PlayerGui end)
+if not screenGui.Parent then
+    pcall(function() screenGui.Parent = game:GetService("CoreGui") end)
+end
 
 -- Blur
 local blur = Instance.new("BlurEffect")
 blur.Size = 0
-blur.Parent = game.Lighting
+pcall(function() blur.Parent = game.Lighting end)
 
 -- === HELPERS ===
 
