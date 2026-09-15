@@ -472,7 +472,7 @@ makeValue(mainTab, player.Team and player.Team.Name or "none", 17)
 -- ==================
 local detectTab = createTab("Detection")
 
-makeLabel(detectTab, "detections – sends alerts in chat", 1)
+makeLabel(detectTab, "detections - sends alerts in chat", 1)
 makeDivider(detectTab, 2)
 
 local detectConns = {}
@@ -605,7 +605,7 @@ makeToggle(detectTab, "Enlighten Alarm", 6, function(state)
     end)
 end)
 
--- Lag machine detector — 15 blocks per second threshold
+-- Lag machine detector - 15 blocks per second threshold
 local buildCounts = {}
 makeToggle(detectTab, "Lag Machine Detector", 7, function(state)
     clearDetectConn("LagMachine")
@@ -920,7 +920,7 @@ makeToggle(deadlyTab, "Glitch blocks", 6, function(state)
                             pcall(function()
                                 paintEvent:FireServer(
                                     v, Enum.NormalId.Top, v.Position,
-                                    "both 🤝", col, "neon", ""
+                                    "both \xF0\x9F\xA4\x9D", col, "neon", ""
                                 )
                             end)
                             if batch % 10 == 0 then task.wait() end
@@ -1147,7 +1147,7 @@ makeToggle(deadlyTab, "Lag Machine", 14, function(state)
                     paintEvent:FireServer(
                         block, side,
                         block.Position + block.Size / 2,
-                        "both 🤝",
+                        "both \xF0\x9F\xA4\x9D",
                         Color3.new(0.00999, 0.00999, 0.00999),
                         "neon", ""
                     )
@@ -1172,7 +1172,7 @@ makeToggle(deadlyTab, "Lag Machine", 14, function(state)
                     paintEvent:FireServer(
                         block, side,
                         block.Position + block.Size / 2,
-                        "both 🤝",
+                        "both \xF0\x9F\xA4\x9D",
                         Color3.new(0.00999, 0.00999, 0.00999),
                         "spray", txt
                     )
@@ -1624,7 +1624,7 @@ player.CharacterAdded:Connect(function()
     setupBrickListener()
 end)
 
--- Get tool's event directly from Backpack — no equip, no Parent reassignment.
+-- Get tool's event directly from Backpack - no equip, no Parent reassignment.
 -- Falls back to Character only if the tool genuinely isn't in Backpack (e.g. it's
 -- already equipped from a prior session), so this still works either way without
 -- ever moving anything itself.
@@ -1663,7 +1663,7 @@ local function placeBlock(pos, bsize)
     return childcube
 end
 
--- Paint block using friend's method: fires color+material together with "both 🤝"
+-- Paint block using friend's method: fires color+material together with "both \xF0\x9F\xA4\x9D"
 local function paintBlock(block, color, matStr, origmat)
     if not block or not block.Parent then return end
     local c = 0
@@ -1674,8 +1674,8 @@ local function paintBlock(block, color, matStr, origmat)
     if not paintEvent then return end
 
     if color then
-        -- use "both 🤝" to set color AND material in one call (friend's method)
-        local args = {block, Enum.NormalId.Top, pos, "both 🤝", color, mat, ""}
+        -- use "both \xF0\x9F\xA4\x9D" to set color AND material in one call (friend's method)
+        local args = {block, Enum.NormalId.Top, pos, "both \xF0\x9F\xA4\x9D", color, mat, ""}
         c = 0
         repeat
             c = c + 1
@@ -2185,7 +2185,7 @@ makeBtn(stashTab, "Start Stash", 4, function()
 
             -- move up and wait 8s cooldown between clones
             hrp.CFrame = CFrame.new(stashposition + Vector3.new(x, 15, y))
-            setStashStatus("stash " .. i .. "/" .. stashamt .. " — waiting 8s cooldown...")
+            setStashStatus("stash " .. i .. "/" .. stashamt .. " - waiting 8s cooldown...")
             for w = 1, 8 do
                 task.wait(1)
                 if stopstash then break end
@@ -2432,7 +2432,7 @@ makeToggle(abuseTab, "Full Abuse (toggle)", 5, function(state)
                 for _, ch in ipairs(chunks) do
                     if not abuseRunning then break end
                     sayInChat(";" .. cmd .. " " .. ch)
-                    setAbuseStatus(cmd .. " → " .. ch)
+                    setAbuseStatus(cmd .. " -> " .. ch)
                     task.wait(1)
                 end
             end
@@ -2539,7 +2539,7 @@ local function makeCodeRow(parent, labelText, idText, order)
     return row
 end
 
--- ── BOOMBOX SECTION ─────────────────────────
+-- -- BOOMBOX SECTION -------------------------
 -- Toggle button
 local bbToggleBtn = Instance.new("TextButton", codesTab)
 bbToggleBtn.Size = UDim2.new(1, 0, 0, 36)
@@ -2649,7 +2649,7 @@ end)
 
 makeDivider(codesTab, 3)
 
--- ── GEAR SECTION ─────────────────────────────
+-- -- GEAR SECTION -----------------------------
 local gearToggleBtn = Instance.new("TextButton", codesTab)
 gearToggleBtn.Size = UDim2.new(1, 0, 0, 36)
 gearToggleBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
