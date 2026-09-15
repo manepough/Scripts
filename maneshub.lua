@@ -1925,7 +1925,7 @@ makeBuildBtn(buildTab, "Get Decal Tool", 16, function()
     dectool.Name = "Decal Tool"
     dectool.RequiresHandle = true
     local handle = Instance.new("Part")
-    handle.Size = Vector3.one * 1.001
+    handle.Size = Vector3.new(1, 1, 1) * 1.001
     handle.Shape = Enum.PartType.Cylinder
     handle.CanCollide = false
     handle.Name = "Handle"
@@ -3028,7 +3028,7 @@ local function getHum2() local c = getChar2() return c and c:FindFirstChildOfCla
 local function getRoot2() local c = getChar2() return c and c:FindFirstChild("HumanoidRootPart") end
 
 local function breakVel2()
-    local zero = Vector3.zero
+    local zero = Vector3.new(0, 0, 0)
     local endTime = tick() + 0.8
     while tick() < endTime do
         local char = getChar2()
@@ -3094,7 +3094,7 @@ makeToggle(antisTab, "Anti Void", 5, function(state)
             local root = getRoot2()
             if root and root.Position.Y < -100 then
                 root.CFrame = CFrame.new(0, 100, 0)
-                root.AssemblyLinearVelocity = Vector3.zero
+                root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
             end
         end)
     else
@@ -3110,12 +3110,12 @@ makeToggle(antisTab, "Anti Fling", 6, function(state)
             local root = getRoot2()
             if not root then return end
             if root.AssemblyLinearVelocity.Magnitude > 200 then
-                root.AssemblyLinearVelocity = Vector3.zero
-                root.AssemblyAngularVelocity = Vector3.zero
+                root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
             end
             local pos = root.Position
             if math.abs(pos.X) > 10000 or math.abs(pos.Y) > 10000 or math.abs(pos.Z) > 10000 then
-                root.AssemblyLinearVelocity = Vector3.zero
+                root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
                 player.Character:PivotTo(CFrame.new(0, 200, 0))
                 task.spawn(breakVel2)
             end
