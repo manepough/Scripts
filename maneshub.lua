@@ -20,7 +20,7 @@ local whitelist = {
 
 local function isWhitelisted()
     if #whitelist == 0 then return true end
-    for _, id in whitelist do
+    for _, id in ipairs(whitelist) do
         if player.UserId == id then return true end
     end
     return false
@@ -134,13 +134,13 @@ end
 -- findbtools: gets event directly from backpack, no equipping needed
 local function findbtools(name)
     local btools = {}
-    for _, v in player.Backpack:GetChildren() do
+    for _, v in ipairs(player.Backpack:GetChildren()) do
         if v:IsA("Tool") and v.Name == name and v:FindFirstChild("Script") and v.Script:FindFirstChild("Event") then
             table.insert(btools, {bt = v, e = v.Script.Event})
         end
     end
     if player.Character then
-        for _, v in player.Character:GetChildren() do
+        for _, v in ipairs(player.Character:GetChildren()) do
             if v:IsA("Tool") and v.Name == name and v:FindFirstChild("Script") and v.Script:FindFirstChild("Event") then
                 table.insert(btools, {bt = v, e = v.Script.Event})
             end
@@ -659,30 +659,29 @@ makeToggle(deadlyTab, "Delete all blocks", 1, function(state)
 
         while deleteRunning do
             local dtools = findbtools("Delete")
-            if #dtools == 0 then task.wait(0.5) continue end
-
-            local dt = dtools[1]
-
-            local bricks = {}
-            for _, v in workspace:GetDescendants() do
-                if v:IsA("BasePart") and v.Name == "Brick" and v.Parent then
-                    table.insert(bricks, v)
+            if #dtools == 0 then task.wait(0.5)
+            else
+                local dt = dtools[1]
+                local bricks = {}
+                for _, v in ipairs(workspace:GetDescendants()) do
+                    if v:IsA("BasePart") and v.Name == "Brick" and v.Parent then
+                        table.insert(bricks, v)
+                    end
+                end
+                if #bricks == 0 then task.wait(0.3)
+                else
+                    for _, v in ipairs(bricks) do
+                        if not deleteRunning then break end
+                        if v and v.Parent then
+                            pcall(function()
+                                dt.e:FireServer(v, hrp.Position)
+                            end)
+                            task.wait(0.03)
+                        end
+                    end
+                    task.wait(0.1)
                 end
             end
-
-            if #bricks == 0 then task.wait(0.3) continue end
-
-            for _, v in bricks do
-                if not deleteRunning then break end
-                if v and v.Parent then
-                    pcall(function()
-                        dt.e:FireServer(v, hrp.Position)
-                    end)
-                    task.wait(0.03)
-                end
-            end
-
-            task.wait(0.1)
         end
     end)
 end)
@@ -826,7 +825,7 @@ ppLayout.SortOrder = Enum.SortOrder.LayoutOrder
 local activeSwatch = nil
 local pickerJustOpened = false
 
-for i, col in presets do
+for i, col in ipairs(presets) do
     local dot = Instance.new("TextButton", ppGrid)
     dot.Size = UDim2.new(0, 18, 0, 18)
     dot.BackgroundColor3 = col
@@ -878,10 +877,10 @@ makeToggle(deadlyTab, "Glitch blocks", 6, function(state)
         -- find paint event more reliably
         local function getPaintEvent()
             local function search(parent)
-                for _, v in parent:GetChildren() do
+                for _, v in ipairs(parent:GetChildren()) do
                     if v:IsA("Tool") and v.Name == "Paint" then
                         -- search all scripts inside
-                        for _, s in v:GetDescendants() do
+                        for _, s in ipairs(v:GetDescendants()) do
                             if (s:IsA("Script") or s:IsA("LocalScript") or s:IsA("ModuleScript")) then
                                 local ev = s:FindFirstChild("Event")
                                 if ev then return ev end
@@ -899,49 +898,37 @@ makeToggle(deadlyTab, "Glitch blocks", 6, function(state)
 
         while glitchRunning do
             local paintEvent = getPaintEvent()
-            if not paintEvent then task.wait(0.5) continue end
-
             local cfolder = workspace:FindFirstChild("Bricks")
-            if not cfolder then task.wait(0.5) continue end
-
-            local bricks = {}
-            for _, v in cfolder:GetDescendants() do
-                if v:IsA("BasePart") then
-                    table.insert(bricks, v)
-                end
-            end
-
-            if #bricks == 0 then task.wait(0.5) continue end
-
-            -- alternate color every loop pass
-            local colorIndex = (math.floor(tick() * 3) % 2) + 1
-            local col = colorIndex == 1 and glitchColor1 or glitchColor2
-
-            -- fire all blocks fast using task.defer so it doesn't block
-            local batch = 0
-            for _, v in bricks do
-                if not glitchRunning then break end
-                if v and v.Parent then
-                    batch += 1
-                    pcall(function()
-                        paintEvent:FireServer(
-                            v,
-                            Enum.NormalId.Top,
-                            v.Position,
-                            "both 🤝",
-                            col,
-                            "neon",
-                            ""
-                        )
-                    end)
-                    -- yield every 10 blocks to avoid freezing
-                    if batch % 10 == 0 then
-                        task.wait()
+            if not paintEvent or not cfolder then task.wait(0.5)
+            else
+                local bricks = {}
+                for _, v in ipairs(cfolder:GetDescendants()) do
+                    if v:IsA("BasePart") then
+                        table.insert(bricks, v)
                     end
                 end
-            end
-            task.wait(0.15)
-        end
+                if #bricks == 0 then task.wait(0.5)
+                else
+                    local colorIndex = (math.floor(tick() * 3) % 2) + 1
+                    local col = colorIndex == 1 and glitchColor1 or glitchColor2
+                    local batch = 0
+                    for _, v in ipairs(bricks) do
+                        if not glitchRunning then break end
+                        if v and v.Parent then
+                            batch = batch + 1
+                            pcall(function()
+                                paintEvent:FireServer(
+                                    v, Enum.NormalId.Top, v.Position,
+                                    "both 🤝", col, "neon", ""
+                                )
+                            end)
+                            if batch % 10 == 0 then task.wait() end
+                        end
+                    end
+                    task.wait(0.15)
+                end -- end #bricks else
+            end -- end paintEvent/cfolder else
+        end -- end while
     end)
 end)
 
@@ -957,11 +944,11 @@ makeToggle(deadlyTab, "Shutdown Server (keep clicking screen)", 9, function(stat
 
         -- helper: find a tool by name anywhere in backpack or character
         local function findTool(name)
-            for _, v in player.Backpack:GetChildren() do
+            for _, v in ipairs(player.Backpack:GetChildren()) do
                 if v:IsA("Tool") and v.Name == name then return v end
             end
             if player.Character then
-                for _, v in player.Character:GetChildren() do
+                for _, v in ipairs(player.Character:GetChildren()) do
                     if v:IsA("Tool") and v.Name == name then return v end
                 end
             end
@@ -981,7 +968,7 @@ makeToggle(deadlyTab, "Shutdown Server (keep clicking screen)", 9, function(stat
         -- helper: unequip all tools back to backpack
         local function unequipAll()
             if not player.Character then return end
-            for _, v in player.Character:GetChildren() do
+            for _, v in ipairs(player.Character:GetChildren()) do
                 if v:IsA("Tool") then
                     pcall(function() v.Parent = player.Backpack end)
                 end
@@ -1296,7 +1283,7 @@ local function jsonDecode(s) return http:JSONDecode(s) end
 local function listSaves()
     local files = {}
     pcall(function()
-        for _, v in listfiles(BUILDS_FOLDER) do
+        for _, v in ipairs(listfiles(BUILDS_FOLDER)) do
             local name = v:gsub(BUILDS_FOLDER .. "/", ""):gsub(BUILDS_FOLDER .. "\\", ""):gsub(".json", "")
             if name ~= "" and name ~= "_lastbuild" then
                 table.insert(files, name)
@@ -1403,7 +1390,7 @@ makeBuildBtn(buildTab, "Save My Build", 4, function()
     local playerFolder = workspace:FindFirstChild("Bricks") and workspace.Bricks:FindFirstChild(player.Name)
     if not playerFolder then setStatus("no blocks found", true) return end
     local builddata = {}
-    for _, v in playerFolder:GetChildren() do
+    for _, v in ipairs(playerFolder:GetChildren()) do
         if v:IsA("BasePart") then
             local bd = saveBlock(v)
             if bd then table.insert(builddata, bd) end
@@ -1422,7 +1409,7 @@ makeBuildBtn(buildTab, "Save Server Builds", 5, function()
     local name = nameInput.Text
     if name == "" then setStatus("enter a name first", true) return end
     local builddata = {}
-    for _, v in workspace:GetDescendants() do
+    for _, v in ipairs(workspace:GetDescendants()) do
         if v:IsA("BasePart") and v.Name == "Brick" then
             local bd = saveBlock(v)
             if bd then table.insert(builddata, bd) end
@@ -1471,7 +1458,7 @@ makeBuildBtn(buildTab, "Save Player's Build", 58, function()
     local bricksFolder = workspace:FindFirstChild("Bricks")
     if not bricksFolder then setStatus("no Bricks folder found", true) return end
 
-    for _, folder in bricksFolder:GetChildren() do
+    for _, folder in ipairs(bricksFolder:GetChildren()) do
         if folder.Name:lower():find(targetName:lower(), 1, true) then
             targetFolder = folder
             break
@@ -1481,7 +1468,7 @@ makeBuildBtn(buildTab, "Save Player's Build", 58, function()
     if not targetFolder then setStatus("player '" .. targetName .. "' not found", true) return end
 
     local builddata = {}
-    for _, v in targetFolder:GetChildren() do
+    for _, v in ipairs(targetFolder:GetChildren()) do
         if v:IsA("BasePart") then
             local bd = saveBlock(v)
             if bd then table.insert(builddata, bd) end
@@ -1530,7 +1517,7 @@ local selectedBuild = nil
 local selectedBuildName = nil
 
 function refreshSavesList()
-    for _, c in savesScroll:GetChildren() do
+    for _, c in ipairs(savesScroll:GetChildren()) do
         if c:IsA("TextButton") or c:IsA("TextLabel") then c:Destroy() end
     end
     local saves = listSaves()
@@ -1545,7 +1532,7 @@ function refreshSavesList()
         empty.ZIndex = 9
         return
     end
-    for _, name in saves do
+    for _, name in ipairs(saves) do
         local btn = Instance.new("TextButton", savesScroll)
         btn.Size = UDim2.new(1, 0, 0, 22)
         btn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
@@ -1750,7 +1737,7 @@ local function verifyAndFill(build)
         if stopped then break end
         local pos = Vector3.new(v.p[1], v.p[2], v.p[3])
         local found = false
-        for _, bl in bfolder:GetChildren() do
+        for _, bl in ipairs(bfolder:GetChildren()) do
             if bl:IsA("BasePart") and (bl.Position - pos).Magnitude < 3 then
                 found = true
                 break
@@ -1982,14 +1969,14 @@ makeToggle(autoTab, "Auto pickup Enlighten/Arkenstone", 1, function(state)
             local hum = char and char:FindFirstChildOfClass("Humanoid")
             if hum and hum.Health > 0 then
                 -- check workspace directly for The Arkenstone dropped there
-                for _, v in workspace:GetChildren() do
+                for _, v in ipairs(workspace:GetChildren()) do
                     if v:IsA("Tool") and v.Name == "The Arkenstone" then
                         pcall(function() hum:EquipTool(v) end)
                         autoStatus.Text = "picked up: The Arkenstone"
                     end
                 end
                 -- also check for any enlighten-related tools dropped in workspace
-                for _, v in workspace:GetChildren() do
+                for _, v in ipairs(workspace:GetChildren()) do
                     if v:IsA("Tool") and v:FindFirstChild("Handle")
                         and v.Name:lower():find("enlighten") then
                         pcall(function() hum:EquipTool(v) end)
@@ -2050,7 +2037,7 @@ end
 local cfolder = workspace:FindFirstChild("Bricks")
 local playerIndex = 1
 if cfolder then
-    for i, v in cfolder:GetChildren() do
+    for i, v in ipairs(cfolder:GetChildren()) do
         if v.Name == player.Name then playerIndex = i break end
     end
 end
@@ -2315,7 +2302,7 @@ local plrBtns = {}
 local allBtn = nil
 
 local function refreshAbusePlayerList()
-    for _, c in plrListScroll:GetChildren() do
+    for _, c in ipairs(plrListScroll:GetChildren()) do
         if c:IsA("TextButton") or c:IsA("TextLabel") then c:Destroy() end
     end
     plrBtns = {}
@@ -2335,49 +2322,50 @@ local function refreshAbusePlayerList()
         if selectedPlayers["__ALL__"] then
             selectedPlayers = {}
             allBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-            for _, b in plrBtns do b.BackgroundColor3 = Color3.fromRGB(25, 25, 25) end
+            for _, b in ipairs(plrBtns) do b.BackgroundColor3 = Color3.fromRGB(25, 25, 25) end
         else
             selectedPlayers = {["__ALL__"] = true}
-            for _, p in Players:GetPlayers() do
+            for _, p in ipairs(Players:GetPlayers()) do
                 if p ~= player then selectedPlayers[p.Name] = true end
             end
             allBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
-            for _, b in plrBtns do b.BackgroundColor3 = Color3.fromRGB(0, 120, 200) end
+            for _, b in ipairs(plrBtns) do b.BackgroundColor3 = Color3.fromRGB(0, 120, 200) end
         end
         local count = 0
-        for k in selectedPlayers do if k ~= "__ALL__" then count += 1 end end
+        for k in pairs(selectedPlayers) do if k ~= "__ALL__" then count = count + 1 end end
         setAbuseStatus(count .. " selected")
     end)
 
     -- individual player buttons
-    for _, p in Players:GetPlayers() do
-        if p == player then continue end
-        local btn = Instance.new("TextButton", plrListScroll)
-        btn.Size = UDim2.new(1, 0, 0, 22)
-        btn.BackgroundColor3 = selectedPlayers[p.Name] and Color3.fromRGB(0, 120, 200) or Color3.fromRGB(25, 25, 25)
-        btn.BorderSizePixel = 0
-        btn.Font = Enum.Font.Gotham
-        btn.TextSize = 11
-        btn.TextColor3 = Color3.fromRGB(200, 200, 200)
-        btn.Text = p.Name
-        btn.ZIndex = 9
-        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
-        table.insert(plrBtns, btn)
-        local pname = p.Name
-        btn.MouseButton1Click:Connect(function()
-            if selectedPlayers[pname] then
-                selectedPlayers[pname] = nil
-                selectedPlayers["__ALL__"] = nil
-                btn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-                if allBtn then allBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30) end
-            else
-                selectedPlayers[pname] = true
-                btn.BackgroundColor3 = Color3.fromRGB(0, 120, 200)
-            end
-            local count = 0
-            for k in selectedPlayers do if k ~= "__ALL__" then count += 1 end end
-            setAbuseStatus(count .. " selected")
-        end)
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= player then
+            local btn = Instance.new("TextButton", plrListScroll)
+            btn.Size = UDim2.new(1, 0, 0, 22)
+            btn.BackgroundColor3 = selectedPlayers[p.Name] and Color3.fromRGB(0, 120, 200) or Color3.fromRGB(25, 25, 25)
+            btn.BorderSizePixel = 0
+            btn.Font = Enum.Font.Gotham
+            btn.TextSize = 11
+            btn.TextColor3 = Color3.fromRGB(200, 200, 200)
+            btn.Text = p.Name
+            btn.ZIndex = 9
+            Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+            table.insert(plrBtns, btn)
+            local pname = p.Name
+            btn.MouseButton1Click:Connect(function()
+                if selectedPlayers[pname] then
+                    selectedPlayers[pname] = nil
+                    selectedPlayers["__ALL__"] = nil
+                    btn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+                    if allBtn then allBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30) end
+                else
+                    selectedPlayers[pname] = true
+                    btn.BackgroundColor3 = Color3.fromRGB(0, 120, 200)
+                end
+                local count = 0
+                for k in pairs(selectedPlayers) do if k ~= "__ALL__" then count = count + 1 end end
+                setAbuseStatus(count .. " selected")
+            end)
+        end
     end
 end
 
@@ -2399,7 +2387,7 @@ makeDivider(abuseTab, 4)
 
 local function getTargets()
     local targets = {}
-    for name, v in selectedPlayers do
+    for name, v in pairs(selectedPlayers) do
         if name ~= "__ALL__" and v then
             table.insert(targets, name:gsub("_", "."):sub(1, 7))
         end
@@ -2428,7 +2416,7 @@ makeToggle(abuseTab, "Full Abuse (toggle)", 5, function(state)
             -- chunk into groups of 4 (safe limit per command)
             local chunks = {}
             local chunk = {}
-            for _, sn in targets do
+            for _, sn in ipairs(targets) do
                 table.insert(chunk, sn)
                 if #chunk >= 4 then
                     table.insert(chunks, table.concat(chunk, " "))
@@ -2438,9 +2426,9 @@ makeToggle(abuseTab, "Full Abuse (toggle)", 5, function(state)
             if #chunk > 0 then table.insert(chunks, table.concat(chunk, " ")) end
 
             local commands = {"oof", "mute", "dumb", "myopic", "blind", "delcubes"}
-            for _, cmd in commands do
+            for _, cmd in ipairs(commands) do
                 if not abuseRunning then break end
-                for _, ch in chunks do
+                for _, ch in ipairs(chunks) do
                     if not abuseRunning then break end
                     sayInChat(";" .. cmd .. " " .. ch)
                     setAbuseStatus(cmd .. " → " .. ch)
