@@ -1065,7 +1065,7 @@ makeToggle(deadlyTab, "Anti Lag Machine", 13, function(state)
             for _, block in ipairs(folder:GetChildren()) do
                 if block:IsA("BasePart") and not block.CanCollide then
                     local p = block.Position
-                    local key = math.round(p.X).."_"..math.round(p.Y).."_"..math.round(p.Z)
+                    local key = math.floor(p.X + 0.5).."_"..math.floor(p.Y + 0.5).."_"..math.floor(p.Z + 0.5)
                     if not posMap[key] then posMap[key] = {} end
                     table.insert(posMap[key], block)
                 end
@@ -1298,7 +1298,7 @@ local function saveBlock(bl)
     local bd = {}
     bd.a  = bl.Anchored
     bd.p  = {bl.Position.X, bl.Position.Y, bl.Position.Z}
-    bd.c  = {math.round(bl.Color.R*255), math.round(bl.Color.G*255), math.round(bl.Color.B*255)}
+    bd.c  = {math.floor(bl.Color.R*255 + 0.5), math.floor(bl.Color.G*255 + 0.5), math.floor(bl.Color.B*255 + 0.5)}
     bd.m  = getMaterialStr(bl.Material)
     bd.sp = {}
     bd.o  = bl.Material.Name
@@ -1645,7 +1645,7 @@ local function placeBlock(pos, bsize)
     local tBlock, tNorm, tHit = getInfiniteBuildArgs(pos)
     local args = {tBlock, tNorm, tHit, bsize or "normal"}
 
-    pcall(function() buildEvent:FireServer(table.unpack(args)) end)
+    pcall(function() buildEvent:FireServer(unpack(args)) end)
 
     repeat
         c = c + 1
@@ -1653,7 +1653,7 @@ local function placeBlock(pos, bsize)
         tBlock, tNorm, tHit = getInfiniteBuildArgs(pos)
         args = {tBlock, tNorm, tHit, bsize or "normal"}
         if buildEvent then
-            pcall(function() buildEvent:FireServer(table.unpack(args)) end)
+            pcall(function() buildEvent:FireServer(unpack(args)) end)
         end
         task.wait(0.02)
     until (built and childcube) or stopped or skipblock or c > 50
@@ -1682,7 +1682,7 @@ local function paintBlock(block, color, matStr, origmat)
             if paintEvent and block and block.Parent then
                 pos = block.Position + block.Size / 2
                 args[3] = pos
-                pcall(function() paintEvent:FireServer(table.unpack(args)) end)
+                pcall(function() paintEvent:FireServer(unpack(args)) end)
             end
             task.wait(0.2)
         until not block or not block.Parent
@@ -2253,7 +2253,7 @@ end)
 
 makeDivider(stashTab, 10)
 makeLabel(stashTab, "stash position (auto-generated)", 11)
-makeValue(stashTab, math.round(stashposition.X)..","..math.round(stashposition.Y)..","..math.round(stashposition.Z), 12)
+makeValue(stashTab, math.floor(stashposition.X + 0.5)..","..math.floor(stashposition.Y + 0.5)..","..math.floor(stashposition.Z + 0.5), 12)
 
 -- ==================
 -- ABUSE TAB
@@ -2794,7 +2794,7 @@ local namecolors = {
 
 local function colorToHex(c)
     return string.format("#%02x%02x%02x",
-        math.round(c.R*255), math.round(c.G*255), math.round(c.B*255))
+        math.floor(c.R*255 + 0.5), math.floor(c.G*255 + 0.5), math.floor(c.B*255 + 0.5))
 end
 
 local function hasArken(p)
