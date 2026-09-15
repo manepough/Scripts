@@ -1,4 +1,5 @@
 -- ManesHub
+local _ok, _err = pcall(function()
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -3249,3 +3250,25 @@ makeToggle(antisTab, "Anti Move / Force", 11, function(state)
         end)
     end
 end)
+
+end) -- end pcall
+if not _ok then
+    local sg = Instance.new('ScreenGui')
+    sg.Name = 'ManesHubError'
+    sg.ResetOnSpawn = false
+    pcall(function() sg.Parent = game:GetService('Players').LocalPlayer.PlayerGui end)
+    if not sg.Parent then pcall(function() sg.Parent = game:GetService('CoreGui') end) end
+    local f = Instance.new('Frame', sg)
+    f.Size = UDim2.new(1,0,0,60)
+    f.Position = UDim2.new(0,0,0.4,0)
+    f.BackgroundColor3 = Color3.new(0,0,0)
+    local lbl = Instance.new('TextLabel', f)
+    lbl.Size = UDim2.new(1,0,1,0)
+    lbl.BackgroundTransparency = 1
+    lbl.Font = Enum.Font.Gotham
+    lbl.TextSize = 11
+    lbl.TextColor3 = Color3.new(1,0.3,0.3)
+    lbl.TextWrapped = true
+    lbl.Text = 'ManesHub Error: ' .. tostring(_err)
+    task.delay(15, function() pcall(function() sg:Destroy() end) end)
+end
